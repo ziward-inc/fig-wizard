@@ -4,12 +4,17 @@ A/B test of preprocessing recipes for PP-DocLayoutV3.onnx.
 
 Two candidate recipes disagree:
   (A) README / batched_inference_example.py: BGR->RGB, /255, ImageNet mean/std normalize
-  (B) config.json Preprocess block literally: Resize -> NormalizeImage(mean=0,std=1,norm_type="none") -> Permute
-      i.e. no mean/std shift; "none" norm_type in PaddleDetection means the /255 scaling
-      is also skipped, so raw 0-255 float32 pixel values are passed through.
+  (B) config.json Preprocess block literally: Resize -> NormalizeImage(mean=0,std=1,norm_type="none") -> Permute.
+      Recipes B and C below test the (incorrect, see result below) hypothesis that
+      "none" norm_type also skips the /255 scaling, i.e. raw 0-255 float32 pixel values.
 
-We run both on the same page and compare max confidence / box count / class agreement
-to determine which recipe the exported graph actually expects.
+Result: B/C (no /255 at all) produce ZERO detections - clearly wrong. This reveals that
+PaddleDetection's NormalizeImage /255 scaling is controlled by a separate `is_scale` flag
+(default True) independent of `norm_type`; "none" only skips the mean/std subtraction step.
+So config.json, read correctly, actually specifies recipe D below (which also wins
+empirically): BGR->RGB, /255, no mean/std shift. Recipe A (ImageNet mean/std on top of
+/255) still produces valid boxes but is consistently lower-confidence - it was the
+(harmless but suboptimal) deviation from what the model was actually exported to expect.
 """
 import json
 

@@ -44,21 +44,26 @@ LABEL_COLORS = {name: color_for(i) for i, name in enumerate(LABELS)}
 
 def preprocess(image_bgr, target_input_size=TARGET_SIZE):
     """
-    Preprocessing recipe determined empirically (see preprocess_ab_test.py).
+    Preprocessing recipe determined empirically (see preprocess_ab_test.py),
+    and now understood to match config.json's Preprocess block correctly.
 
-    Neither of the two documented recipes was fully correct:
-      - The HF README/example script applies ImageNet mean/std normalization
-        after /255 scaling. This *works* (valid boxes) but under-confidences
-        detections relative to the alternative below.
-      - config.json's Preprocess block literally specifies
-        NormalizeImage(mean=0, std=1, norm_type="none"), which we interpreted
-        as "skip the /255 scaling too" (raw 0-255 pixel values). That recipe
-        produced ZERO detections above threshold - clearly wrong.
+    The HF README/example script applies ImageNet mean/std normalization
+    after /255 scaling. This *works* (produces valid, correctly-shaped
+    boxes) but gives lower-confidence, slightly worse-localized detections
+    than the recipe below, on every test page we tried.
 
-    The empirically-best recipe (highest, most consistent confidence scores
-    across multiple test pages, near-identical box locations to the README
-    recipe but tighter) is: BGR->RGB, scale to [0,1] via /255, and *no*
-    ImageNet mean/std shift. This is what we use here.
+    config.json's Preprocess block specifies
+    NormalizeImage(mean=0, std=1, norm_type="none"). In PaddleDetection,
+    NormalizeImage's /255 scaling is controlled by a separate `is_scale`
+    flag (default True) that is independent of `norm_type` - `norm_type:
+    "none"` only skips the mean/std subtraction step, not the /255 scale.
+    So the config, read correctly, actually specifies exactly this recipe:
+    BGR->RGB, /255, and *no* ImageNet mean/std shift. Our first attempt to
+    replicate the config literally (skipping /255 too, i.e. raw 0-255
+    pixel values) produced zero detections above threshold, which is what
+    revealed the misreading. Net takeaway for the Rust port: config.json
+    and empirical results agree; the HF README's ImageNet-style
+    normalization was the (harmless but suboptimal) deviation to drop.
     """
     orig_h, orig_w = image_bgr.shape[:2]
     target_h, target_w = target_input_size
