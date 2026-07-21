@@ -40,3 +40,10 @@ futures-util = "0.3"
 flate2 = "1"
 tar = "0.4"
 
+[features]
+default = []
+# Enables ort's CoreML execution provider (Apple Silicon GPU/Neural Engine
+# acceleration for ONNX inference). Off by default pending benchmarking -
+# see src/detect/mod.rs and tests/detect_bench.rs for the CPU-vs-CoreML
+# comparison and the reasoning behind the current default.
+coreml = ["ort/coreml"]

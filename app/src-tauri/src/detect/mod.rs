@@ -30,8 +30,41 @@ pub struct DocLayoutModel {
 }
 
 impl DocLayoutModel {
+    /// Loads the model, registering the CoreML execution provider first
+    /// (when built with the `coreml` Cargo feature) with CPU as the
+    /// fallback for anything CoreML can't or won't run.
+    ///
+    /// `ort`'s execution-provider registration is fail-open by default
+    /// (`ExecutionProviderDispatch::fail_silently`, which is what
+    /// `.build()` produces): if CoreML EP registration itself fails (e.g.
+    /// unsupported OS version), `ort` logs a warning and falls back to CPU
+    /// for the whole session. And even when CoreML registers successfully,
+    /// ONNX Runtime's EP mechanism partitions the graph per-node - any node
+    /// CoreML can't take runs on the CPU EP that's always implicitly
+    /// available. So no explicit `error_behavior`/fallback plumbing is
+    /// needed here: the fallback is automatic on both a "did the EP even
+    /// register" and a "does this particular op run on it" level.
     pub fn load(model_path: &Path, labels: Vec<String>) -> Result<Self> {
-        let session = Session::builder()?.commit_from_file(model_path)?;
+        #[allow(unused_mut)]
+        let mut builder = Session::builder()?;
+
+        #[cfg(feature = "coreml")]
+        {
+            // `with_execution_providers` returns `Result<SessionBuilder,
+            // ort::Error<SessionBuilder>>` (the builder is threaded through
+            // the error type so it can be recovered on failure), which
+            // means the error type embeds a `SessionBuilder` and isn't
+            // `Send + Sync` - so it can't go through `anyhow`'s blanket `?`
+            // conversion. Format it to a string instead of propagating the
+            // raw error type.
+            builder = builder
+                .with_execution_providers([ort::ep::CoreML::default()
+                    .with_compute_units(ort::ep::coreml::ComputeUnits::All)
+                    .build()])
+                .map_err(|e| anyhow!("failed to register CoreML execution provider: {e}"))?;
+        }
+
+        let session = builder.commit_from_file(model_path)?;
         Ok(Self { session, labels })
     }
 
