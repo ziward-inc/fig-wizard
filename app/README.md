@@ -65,8 +65,10 @@ association, file paths).
   its config, and the PDFium archive straight to disk with no SHA-256 check against a known
   hash. Fine for a personal-use v1 pointed at a fixed, trusted URL; a TODO for later if this
   ever needs to be hardened.
-- **macOS only**, and PDFium asset resolution is currently hardcoded to the arm64 build
-  (`pdfium-mac-arm64.tgz`) — no Intel Mac fallback.
+- **Apple Silicon Macs only, macOS 15+** — this is an explicit scope decision, not a
+  temporary gap. PDFium asset resolution is hardcoded to the arm64 build
+  (`pdfium-mac-arm64.tgz`); Intel support is intentionally out of scope. `tauri.conf.json`
+  sets `bundle.macOS.minimumSystemVersion` to `15.0` accordingly.
 - **One extraction (or PDF open) at a time.** PDFium's library binding can only happen once
   per process (`pdfium-render`'s `Pdfium::bind_to_library` errors on a second call), so the
   app keeps a single shared `Pdfium` instance and hands it between commands rather than
