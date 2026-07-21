@@ -67,3 +67,14 @@ association, file paths).
   ever needs to be hardened.
 - **macOS only**, and PDFium asset resolution is currently hardcoded to the arm64 build
   (`pdfium-mac-arm64.tgz`) — no Intel Mac fallback.
+- **One extraction (or PDF open) at a time.** PDFium's library binding can only happen once
+  per process (`pdfium-render`'s `Pdfium::bind_to_library` errors on a second call), so the
+  app keeps a single shared `Pdfium` instance and hands it between commands rather than
+  re-binding per call. The UI enforces this by disabling PDF/output selection while a job is
+  running; there's no queueing of multiple extractions.
+- **Per-page timing varies a lot** with page content (how many/how large the detected
+  objects are) and with how much else is competing for CPU on the machine at the time - a
+  12-page paper was observed taking well over an hour end-to-end during one `cargo tauri
+  dev` manual test session (heavily CPU-contended machine at the time), vs. the ~15
+  minutes/15-page figure quoted above from an otherwise-idle `cargo test` run. Treat both as
+  data points, not guarantees, when judging a build's actual performance.
