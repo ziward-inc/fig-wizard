@@ -6,4 +6,5 @@ near-4K WebP and AVIF images (quality 85), with and without captions.
 
 See the design plan for full architecture details.
 
-Status: Phase 0 (detection model validation spike) in progress.
+Status: end-to-end app (Rust pipeline + Tauri commands + UI) is wired up and usable. See
+`app/README.md` for how to run it and known limitations.

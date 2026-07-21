@@ -4,36 +4,84 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
+    <title>PDF Paper Image Extractor</title>
     <script type="module" src="/main.js" defer></script>
   </head>
 
   <body>
     <main class="container">
-      <h1>Welcome to Tauri</h1>
+      <header class="app-header">
+        <h1>PDF Paper Image Extractor</h1>
+        <p class="subtitle">
+          Pull figures, tables, formulas, and algorithm blocks out of an academic paper PDF.
+        </p>
+      </header>
 
-      <div class="row">
-        <a href="https://tauri.app" target="_blank">
-          <img src="/assets/tauri.svg" class="logo tauri" alt="Tauri logo" />
-        </a>
-        <a
-          href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"
-          target="_blank"
-        >
-          <img
-            src="/assets/javascript.svg"
-            class="logo vanilla"
-            alt="JavaScript logo"
-          />
-        </a>
-      </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
+      <section id="model-banner" class="banner hidden">
+        <div class="banner-text">
+          <strong id="model-banner-title">Model not ready</strong>
+          <span id="model-banner-detail"></span>
+        </div>
+        <button id="download-model-btn" type="button">Download model (~125MB)</button>
+      </section>
 
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
+      <section id="download-progress" class="card hidden">
+        <div class="progress-row">
+          <span id="download-stage-label">Downloading…</span>
+          <span id="download-percent-label">0%</span>
+        </div>
+        <div class="progress-bar"><div id="download-progress-bar" class="progress-bar-fill"></div></div>
+      </section>
+
+      <section class="card">
+        <h2>1. Choose a PDF</h2>
+        <div id="drop-zone" class="drop-zone">
+          <p id="drop-zone-text">Drag &amp; drop a PDF here, or</p>
+          <button id="choose-pdf-btn" type="button">Choose PDF…</button>
+        </div>
+        <p id="pdf-info" class="info-line hidden"></p>
+      </section>
+
+      <section class="card">
+        <h2>2. Choose an output folder</h2>
+        <div class="row-inline">
+          <button id="choose-output-btn" type="button">Choose output folder…</button>
+          <span id="output-dir-label" class="info-line">No folder selected yet</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3. Extract</h2>
+        <div class="row-inline">
+          <button id="extract-btn" type="button" disabled>Extract</button>
+          <button id="cancel-btn" type="button" class="hidden">Cancel</button>
+        </div>
+        <p id="extract-disabled-reason" class="info-line"></p>
+
+        <div id="progress-area" class="progress-area hidden">
+          <div class="spinner"></div>
+          <div class="progress-details">
+            <p id="progress-page-label">Starting…</p>
+            <div class="counts-row" id="counts-row"></div>
+          </div>
+        </div>
+
+        <p id="error-line" class="error-line hidden"></p>
+      </section>
+
+      <section id="results-section" class="card hidden">
+        <h2>Results</h2>
+        <p id="results-summary" class="info-line"></p>
+        <div id="results-gallery" class="gallery"></div>
+      </section>
     </main>
+
+    <div id="object-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <button id="modal-close-btn" class="modal-close" type="button">&times;</button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
   </body>
 </html>

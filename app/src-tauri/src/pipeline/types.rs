@@ -1,6 +1,6 @@
 //! Shared data types for the detection -> association -> crop -> export pipeline.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// An axis-aligned box in PDF point space (1/72 inch), using PDF's native
 /// bottom-left origin / y-up convention. This is the canonical coordinate
@@ -146,7 +146,7 @@ impl DetectedObject {
 }
 
 /// Paths to the four exported image variants for one detected object.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportedFiles {
     pub with_caption_webp: String,
     pub no_caption_webp: String,
@@ -156,7 +156,7 @@ pub struct ExportedFiles {
 
 /// One manifest entry: everything an external tool/reviewer needs to know
 /// about one exported object.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestEntry {
     pub id: String,
     pub kind: String,
@@ -169,7 +169,7 @@ pub struct ManifestEntry {
     pub files: ExportedFiles,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub source_pdf: String,
     pub page_count: u32,
