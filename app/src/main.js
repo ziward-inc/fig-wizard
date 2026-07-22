@@ -22,6 +22,10 @@ const pdfInfo = document.querySelector("#pdf-info");
 const chooseOutputBtn = document.querySelector("#choose-output-btn");
 const outputDirLabel = document.querySelector("#output-dir-label");
 
+const verifyCheckbox = document.querySelector("#verify-checkbox");
+const verifyHint = document.querySelector("#verify-hint");
+const codexStatusLine = document.querySelector("#codex-status-line");
+
 const extractBtn = document.querySelector("#extract-btn");
 const cancelBtn = document.querySelector("#cancel-btn");
 const extractDisabledReason = document.querySelector("#extract-disabled-reason");
@@ -48,6 +52,7 @@ let outputDirIsDefaulted = false;
 let modelStatus = null;
 let currentJobId = null;
 let cumulativeCounts = {};
+let codexAvailable = null; // null = unknown/not checked yet, else bool
 
 // ---- Small helpers ------------------------------------------------------
 
@@ -122,6 +127,33 @@ listen("model-download-progress", (event) => {
   }
 });
 
+// ---- Codex crop verification (off by default) --------------------------
+
+verifyCheckbox.addEventListener("change", async () => {
+  setHidden(verifyHint, !verifyCheckbox.checked);
+  if (!verifyCheckbox.checked) {
+    setHidden(codexStatusLine, true);
+    codexAvailable = null;
+    updateExtractButtonState();
+    return;
+  }
+  codexStatusLine.textContent = "Checking for Codex CLI…";
+  setHidden(codexStatusLine, false);
+  try {
+    const status = await invoke("codex_status");
+    codexAvailable = status.available;
+    if (status.available) {
+      codexStatusLine.textContent = `Codex CLI found (${status.detail}). Verification will run per object.`;
+    } else {
+      codexStatusLine.textContent = `Codex CLI not available: ${status.detail}. Uncheck this box, or install/authenticate Codex CLI first.`;
+    }
+  } catch (e) {
+    codexAvailable = false;
+    codexStatusLine.textContent = `Could not check Codex CLI status: ${e}`;
+  }
+  updateExtractButtonState();
+});
+
 // ---- PDF selection ----------------------------------------------------
 
 async function loadPdf(path) {
@@ -186,6 +218,7 @@ function updateExtractButtonState() {
   if (!currentPdf) reasons.push("choose a PDF");
   if (!currentOutputDir) reasons.push("choose an output folder");
   if (!modelReady) reasons.push("model not ready — download it above");
+  if (verifyCheckbox.checked && codexAvailable === false) reasons.push("Codex CLI not available");
 
   const busy = currentJobId !== null;
   extractBtn.disabled = reasons.length > 0 || busy;
@@ -213,6 +246,7 @@ extractBtn.addEventListener("click", async () => {
     currentJobId = await invoke("run_extraction", {
       pdfPath: currentPdf.path,
       outputDir: currentOutputDir,
+      verifyWithCodex: verifyCheckbox.checked,
     });
   } catch (e) {
     showError(String(e));
@@ -330,6 +364,35 @@ function renderGallery(manifest) {
   }
 }
 
+// Builds the small "N tries" verification badge shown on a thumbnail/modal
+// when the (off-by-default) Codex verification feature was enabled for the
+// run that produced `entry`. Returns null (render nothing) when
+// `entry.verification` is absent, i.e. the feature wasn't used - keeps the
+// gallery uncluttered for the common/default case.
+function verificationBadge(entry) {
+  const v = entry.verification;
+  if (!v || !v.enabled) return null;
+
+  const badge = document.createElement("span");
+  const tries = `${v.attempts} ${v.attempts === 1 ? "try" : "tries"}`;
+  if (v.passed && v.attempts === 1) {
+    badge.className = "verify-badge verify-ok";
+    badge.textContent = `✓ 1 try`;
+    badge.title = "Codex verified this crop on the first attempt.";
+  } else if (v.passed) {
+    badge.className = "verify-badge verify-corrected";
+    badge.textContent = `⟳ ${tries}`;
+    badge.title = `Codex flagged and corrected this crop (${tries}) before it passed.`;
+  } else {
+    badge.className = "verify-badge verify-failed";
+    badge.textContent = `⚠ ${tries}, still flagged`;
+    badge.title = `Codex could not verify this crop as complete after ${tries}${
+      v.last_issue ? ` (last issue: ${v.last_issue})` : ""
+    }.`;
+  }
+  return badge;
+}
+
 function renderThumb(entry) {
   const card = document.createElement("button");
   card.type = "button";
@@ -339,6 +402,9 @@ function renderThumb(entry) {
   img.src = convertFileSrc(entry.files.with_caption_webp);
   img.alt = `${entry.kind} on page ${entry.page_index + 1}`;
   card.appendChild(img);
+
+  const badge = verificationBadge(entry);
+  if (badge) card.appendChild(badge);
 
   const label = document.createElement("div");
   label.className = "thumb-label";
@@ -360,6 +426,12 @@ function openObjectModal(entry) {
   const title = document.createElement("h3");
   title.textContent = `${entry.kind} — page ${entry.page_index + 1} (score ${(entry.score * 100).toFixed(0)}%)`;
   modalBody.appendChild(title);
+
+  const modalBadge = verificationBadge(entry);
+  if (modalBadge) {
+    modalBadge.classList.add("verify-badge-modal");
+    modalBody.appendChild(modalBadge);
+  }
 
   if (!entry.has_caption) {
     const note = document.createElement("p");

@@ -25,6 +25,7 @@ use crate::detect::DEFAULT_SCORE_THRESH;
 use crate::pdf::render::{init_pdfium, ClipRenderBudget};
 use crate::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
 use crate::pipeline::types::Manifest;
+use crate::verify;
 
 const MODEL_URL: &str =
     "https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx";
@@ -83,6 +84,25 @@ pub struct ModelStatus {
     pub model_present: bool,
     pub pdfium_present: bool,
     pub using_dev_assets: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CodexStatus {
+    pub available: bool,
+    pub detail: String,
+}
+
+/// Checks whether the `codex` CLI is callable at all (on `PATH`, runs
+/// `codex --version` successfully) so the frontend can show a helpful
+/// message up front when the user enables the "verify with Codex"
+/// checkbox, rather than only discovering it's missing after the model
+/// download / PDF selection dance.
+#[tauri::command]
+pub fn codex_status() -> CodexStatus {
+    match verify::codex_available() {
+        Ok(version) => CodexStatus { available: true, detail: version },
+        Err(e) => CodexStatus { available: false, detail: e },
+    }
 }
 
 fn app_data_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -257,8 +277,23 @@ pub async fn run_extraction(
     state: tauri::State<'_, AppState>,
     pdf_path: String,
     output_dir: String,
+    verify_with_codex: Option<bool>,
 ) -> Result<String, String> {
+    let verify_with_codex = verify_with_codex.unwrap_or(false);
     let (model_path, labels) = resolve_model_and_labels(&app)?;
+
+    // Preflight: if verification was requested, fail fast with a clear
+    // message rather than silently no-op'ing (or erroring) per-object deep
+    // into a long extraction run.
+    if verify_with_codex {
+        verify::codex_available().map_err(|e| {
+            format!(
+                "Codex verification was requested, but the `codex` CLI isn't available: {e}. \
+Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
+            )
+        })?;
+    }
+
     let pdfium = take_pdfium(&app, &state)?;
 
     // Make sure the asset protocol can serve images back out of wherever
@@ -290,6 +325,7 @@ pub async fn run_extraction(
                     labels,
                     score_thresh: DEFAULT_SCORE_THRESH,
                     clip_budget: ClipRenderBudget::default(),
+                    verify_with_codex,
                 },
                 &cancel,
                 move |event| {

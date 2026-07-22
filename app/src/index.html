@@ -52,6 +52,19 @@
 
       <section class="card">
         <h2>3. Extract</h2>
+        <div class="row-inline verify-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="verify-checkbox" />
+            Verify crops with Codex (slower)
+          </label>
+        </div>
+        <p id="verify-hint" class="info-line hidden">
+          Uses the <code>codex</code> CLI to double-check each crop and correct it if it's cut off
+          or includes too much extra content, retrying up to 3 times per object. Requires network
+          access and adds a Codex call per object on top of the existing (already CPU/time-heavy)
+          extraction pipeline.
+        </p>
+        <p id="codex-status-line" class="info-line hidden"></p>
         <div class="row-inline">
           <button id="extract-btn" type="button" disabled>Extract</button>
           <button id="cancel-btn" type="button" class="hidden">Cancel</button>
