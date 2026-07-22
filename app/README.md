@@ -12,6 +12,19 @@ pnpm install
 pnpm tauri dev
 ```
 
+### Frontend stack
+
+The UI (`app/src`) is a Vite + React + TypeScript app using [shadcn/ui](https://ui.shadcn.com)
+components (on top of `@base-ui/react` primitives, per this project's `components.json`) and
+Tailwind v4. It talks to the Rust side via `@tauri-apps/api` (`core`/`event`/`webview`) rather
+than the `window.__TAURI__` global - `tauri.conf.json` sets `app.withGlobalTauri: false`
+accordingly. The UI font is [SUITE Variable](https://github.com/sun-typeface/SUITE), vendored
+locally at `app/public/fonts/SUITE-Variable.woff2` (not loaded from a CDN, so the app doesn't
+need network access to render its own chrome) and wired in as `--font-sans` in `src/index.css`;
+Geist Mono remains `--font-mono` for the monospace bits (file paths, etc).
+
+To add more shadcn components: `pnpm dlx shadcn@latest add <name>` from `app/`.
+
 On first run, if the detection model / PDFium library aren't present yet, the app shows a
 "Download model (~125MB)" banner. Clicking it downloads:
 
@@ -55,7 +68,8 @@ a bare Mach-O executable, not an app bundle:
 **Not published to crates.io, and not planned.** `cargo install figwizard` (installing by
 crate name from the registry, without `--path`/a local checkout) doesn't work and isn't
 offered: `cargo publish --dry-run` fails outright, because `tauri.conf.json`'s
-`frontendDist` points to `"../src"` - outside the `src-tauri/` crate root - and a published
+`frontendDist` points to `"../dist"` (the Vite build output) - outside the `src-tauri/`
+crate root - and a published
 crate package only contains files within its own directory, so the frontend simply
 wouldn't be there for anyone installing from the registry. Fixing this would require
 restructuring the frontend to live inside `src-tauri/`. Separately, crates.io is a fully
