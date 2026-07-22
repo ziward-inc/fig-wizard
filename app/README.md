@@ -52,6 +52,18 @@ a bare Mach-O executable, not an app bundle:
 - Still requires the same first-run model/PDFium download described above (unaffected by
   the install method).
 
+**Not published to crates.io, and not planned.** `cargo install figwizard` (installing by
+crate name from the registry, without `--path`/a local checkout) doesn't work and isn't
+offered: `cargo publish --dry-run` fails outright, because `tauri.conf.json`'s
+`frontendDist` points to `"../src"` - outside the `src-tauri/` crate root - and a published
+crate package only contains files within its own directory, so the frontend simply
+wouldn't be there for anyone installing from the registry. Fixing this would require
+restructuring the frontend to live inside `src-tauri/`. Separately, crates.io is a fully
+public registry with no private-crate option and no real way to free a claimed name later,
+which cuts against this repo's private/personal-org distribution scope - so even setting
+the technical issue aside, this was a deliberate choice, not just an oversight. The `.dmg`
+release and the `--path`-based install above remain the supported ways to get the app.
+
 Use the `.dmg` release for a normal double-click-to-install experience; use `cargo
 install` if you specifically want a CLI-launchable binary (e.g. for scripting, or to avoid
 Gatekeeper's `.app` quarantine flow entirely - see notarization below).
