@@ -74,10 +74,21 @@ pub fn export_object(
     let no_caption_avif_path = page_dir.join(format!("{base}_no-caption_q85.avif"));
     let with_caption_avif_path = page_dir.join(format!("{base}_with-caption_q85.avif"));
 
-    fs::write(&no_caption_webp_path, encode_webp(&no_caption_img, 85.0)?)?;
-    fs::write(&with_caption_webp_path, encode_webp(&with_caption_img, 85.0)?)?;
-    fs::write(&no_caption_avif_path, encode_avif(&no_caption_img, 85.0)?)?;
-    fs::write(&with_caption_avif_path, encode_avif(&with_caption_img, 85.0)?)?;
+    // `page_dir` is created up front, but re-assert it here too: if this
+    // export follows a (possibly long, network-bound) verification pass,
+    // be defensive against anything having removed it out from under us in
+    // the meantime, and give each write an explicit path in its error
+    // context rather than a bare unlabelled io::Error.
+    fs::create_dir_all(page_dir).with_context(|| format!("re-creating page output dir {page_dir:?} before writing crops"))?;
+
+    fs::write(&no_caption_webp_path, encode_webp(&no_caption_img, 85.0)?)
+        .with_context(|| format!("writing {no_caption_webp_path:?}"))?;
+    fs::write(&with_caption_webp_path, encode_webp(&with_caption_img, 85.0)?)
+        .with_context(|| format!("writing {with_caption_webp_path:?}"))?;
+    fs::write(&no_caption_avif_path, encode_avif(&no_caption_img, 85.0)?)
+        .with_context(|| format!("writing {no_caption_avif_path:?}"))?;
+    fs::write(&with_caption_avif_path, encode_avif(&with_caption_img, 85.0)?)
+        .with_context(|| format!("writing {with_caption_avif_path:?}"))?;
 
     Ok(ExportedFiles {
         with_caption_webp: with_caption_webp_path.to_string_lossy().to_string(),
