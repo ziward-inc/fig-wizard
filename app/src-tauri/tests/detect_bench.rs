@@ -18,8 +18,8 @@
 //! Requires local dev assets (pdfium dylib + ONNX model) that are
 //! gitignored - see src-tauri/binaries/pdfium and src-tauria/models.
 
-use app_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
-use app_lib::pdf::render::{init_pdfium, render_page_for_detection, resize_for_model};
+use figwizard_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
+use figwizard_lib::pdf::render::{init_pdfium, render_page_for_detection, resize_for_model};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 

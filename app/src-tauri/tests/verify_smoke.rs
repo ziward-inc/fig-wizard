@@ -7,12 +7,12 @@
 //! working, authenticated `codex` CLI on PATH - run explicitly with
 //! `cargo test --test verify_smoke -- --ignored --nocapture`.
 
-use app_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
-use app_lib::pdf::render::{
+use figwizard_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
+use figwizard_lib::pdf::render::{
     init_pdfium, pixel_box_to_pdf_points, render_page_for_detection, resize_for_model,
     ClipRenderBudget,
 };
-use app_lib::verify::{codex_available, verify_and_correct_crop, MAX_ATTEMPTS};
+use figwizard_lib::verify::{codex_available, verify_and_correct_crop, MAX_ATTEMPTS};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 

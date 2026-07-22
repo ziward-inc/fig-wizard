@@ -3,8 +3,8 @@
 //! (pdfium dylib + ONNX model) that are gitignored - see
 //! src-tauri/binaries/pdfium and src-tauri/models.
 
-use app_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
-use app_lib::pdf::render::{
+use figwizard_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
+use figwizard_lib::pdf::render::{
     init_pdfium, pixel_box_to_pdf_points, render_clip, render_page_for_detection, resize_for_model,
     ClipRenderBudget,
 };

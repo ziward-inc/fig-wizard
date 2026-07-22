@@ -16,11 +16,11 @@
 //! failing the whole suite on a machine without libjxl installed, that case
 //! is skipped with a clear printed message.
 
-use app_lib::detect::DEFAULT_SCORE_THRESH;
-use app_lib::pdf::render::{init_pdfium, ClipRenderBudget};
-use app_lib::pipeline::export::cjxl_available;
-use app_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
-use app_lib::pipeline::types::OutputFormat;
+use figwizard_lib::detect::DEFAULT_SCORE_THRESH;
+use figwizard_lib::pdf::render::{init_pdfium, ClipRenderBudget};
+use figwizard_lib::pipeline::export::cjxl_available;
+use figwizard_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
+use figwizard_lib::pipeline::types::OutputFormat;
 use pdfium_render::prelude::Pdfium;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;

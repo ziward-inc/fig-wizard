@@ -1,4 +1,4 @@
-# PDF Paper Image Extractor
+# FigWizard
 
 A macOS-only Tauri app that extracts figures, tables, formulas, and algorithm/pseudocode
 blocks from academic paper PDFs, exporting each as a near-4K crop in **one** user-selected
