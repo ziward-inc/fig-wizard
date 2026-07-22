@@ -8,8 +8,8 @@ without an associated caption.
 ## Running it
 
 ```sh
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 On first run, if the detection model / PDFium library aren't present yet, the app shows a
@@ -29,7 +29,7 @@ is compiled out of release builds.
 
 ## Installing via `cargo install`
 
-As an alternative to the `.dmg` release or running from source with `npm run tauri dev`,
+As an alternative to the `.dmg` release or running from source with `pnpm tauri dev`,
 the app can be installed as a plain binary via Cargo (confirmed working: `cargo install
 --path app/src-tauri --locked` successfully builds and installs a `figwizard` binary):
 
