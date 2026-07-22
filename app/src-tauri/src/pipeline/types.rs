@@ -156,6 +156,18 @@ pub struct ExportedFiles {
 
 /// One manifest entry: everything an external tool/reviewer needs to know
 /// about one exported object.
+/// Outcome of the optional Codex crop-verification pass for one object.
+/// Absent (`None`) on `ManifestEntry` whenever verification wasn't enabled
+/// for the run that produced this entry, so manifests from before this
+/// feature existed (and runs with the checkbox left off) stay clean.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationInfo {
+    pub enabled: bool,
+    pub attempts: u32,
+    pub passed: bool,
+    pub last_issue: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestEntry {
     pub id: String,
@@ -167,6 +179,8 @@ pub struct ManifestEntry {
     pub with_caption_bbox_pt: [f32; 4],
     pub has_caption: bool,
     pub files: ExportedFiles,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VerificationInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

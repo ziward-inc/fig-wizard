@@ -12,7 +12,8 @@ use crate::detect::{DocLayoutModel, TARGET_SIZE};
 use crate::pdf::render::{pixel_box_to_pdf_points, render_page_for_detection, resize_for_model, ClipRenderBudget};
 use crate::pipeline::associate::associate_page;
 use crate::pipeline::export::{export_object, manifest_entry, write_manifest};
-use crate::pipeline::types::{Manifest, ManifestEntry, PageDetection};
+use crate::pipeline::types::{Manifest, ManifestEntry, PageDetection, VerificationInfo};
+use crate::verify;
 
 /// DPI used for the full-page detection-pass render (matches the 200 DPI
 /// used to validate the model in Phase 0 - see phase0-spike/render_pages.py).
@@ -44,6 +45,11 @@ pub struct ProcessPdfParams<'a> {
     pub labels: Vec<String>,
     pub score_thresh: f32,
     pub clip_budget: ClipRenderBudget,
+    /// Off by default: when true, each detected object's crop is checked
+    /// (and, if needed, corrected and re-checked) via the `codex` CLI
+    /// before export - see `crate::verify`. Requires network access and
+    /// meaningfully increases extraction time, hence opt-in.
+    pub verify_with_codex: bool,
 }
 
 /// Runs the full pipeline for one PDF. `on_event` is called for progress
@@ -111,7 +117,7 @@ pub fn process_pdf(
             })
             .collect();
 
-        let objects = associate_page(page_index, &page_dets, geometry.width_pt);
+        let mut objects = associate_page(page_index, &page_dets, geometry.width_pt);
 
         let mut counts_by_kind: HashMap<String, u32> = HashMap::new();
         for obj in &objects {
@@ -126,12 +132,43 @@ pub fn process_pdf(
         let page_dir = doc_out_dir.join(format!("page-{:04}", page_index + 1));
 
         let mut seq_by_kind: HashMap<&'static str, u32> = HashMap::new();
-        for obj in &objects {
+        for obj in &mut objects {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
             let seq = seq_by_kind.entry(obj.kind.as_str()).or_insert(0);
             *seq += 1;
+
+            let verification = if params.verify_with_codex {
+                let verify_dir = std::env::temp_dir().join(format!("pdf-extractor-verify-{}", obj.id));
+                let outcome = verify::verify_and_correct_crop(
+                    &page,
+                    obj.kind.as_str(),
+                    obj.bbox_pt,
+                    params.clip_budget,
+                    verify::MAX_ATTEMPTS,
+                    &verify_dir,
+                    cancel,
+                )
+                .with_context(|| format!("verifying crop for object {}", obj.id))?;
+                let _ = std::fs::remove_dir_all(&verify_dir);
+
+                let (_img, corrected_bbox, verify_outcome) = outcome;
+                // The corrected object-only bbox feeds BOTH the no-caption
+                // crop and (via `with_caption_bbox()`, re-unioned with the
+                // original caption box below) the with-caption crop - one
+                // verification pass per object covers both file variants.
+                obj.bbox_pt = corrected_bbox;
+
+                Some(VerificationInfo {
+                    enabled: true,
+                    attempts: verify_outcome.attempts,
+                    passed: verify_outcome.passed,
+                    last_issue: verify_outcome.last_issue,
+                })
+            } else {
+                None
+            };
 
             let files = export_object(&page, obj, &page_dir, *seq, params.clip_budget)
                 .with_context(|| format!("exporting object {}", obj.id))?;
@@ -142,7 +179,7 @@ pub fn process_pdf(
                 page_index,
             });
 
-            entries.push(manifest_entry(obj, files));
+            entries.push(manifest_entry(obj, files, verification));
         }
     }
 

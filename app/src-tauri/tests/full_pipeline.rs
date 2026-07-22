@@ -54,6 +54,7 @@ fn full_pipeline_on_attention_pdf() {
             labels,
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
+            verify_with_codex: false,
         },
         &cancel,
         |event| match event {
@@ -98,4 +99,79 @@ fn full_pipeline_on_attention_pdf() {
     assert!(manifest_path.exists(), "manifest.json missing at {manifest_path:?}");
 
     println!("wrote {} objects across attention.pdf", manifest.objects.len());
+}
+
+/// Dev-only, network-touching end-to-end test: runs the full pipeline
+/// against ppo.pdf (smaller/faster than attention.pdf, algorithm-heavy)
+/// WITH the optional Codex crop-verification pass turned on, to confirm
+/// real `codex exec` calls happen, the manifest records real per-object
+/// attempt counts, and the feature never aborts the whole run even if some
+/// individual object fails to pass verification. Marked `#[ignore]` since
+/// it costs real wall-clock time and a live Codex CLI/network round-trip
+/// per object - run explicitly with
+/// `cargo test --test full_pipeline verify_with_codex_on_ppo_pdf -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn verify_with_codex_on_ppo_pdf() {
+    let root = repo_root();
+    let pdfium_dir = root.join("app/src-tauri/binaries/pdfium/lib");
+    let model_path = root.join("app/src-tauri/models/PP-DocLayoutV3.onnx");
+    let config_path = root.join("app/src-tauri/models/config.json");
+    let pdf_path = root.join("phase0-spike/pdfs/ppo.pdf");
+    let output_dir = root.join("app/src-tauri/tests/output/ppo_verify_run");
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    let cfg: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let labels: Vec<String> = cfg["label_list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+
+    let pdfium = init_pdfium(&pdfium_dir).expect("init pdfium");
+    let cancel = AtomicBool::new(false);
+
+    let manifest = process_pdf(
+        ProcessPdfParams {
+            pdfium: &pdfium,
+            pdf_path: &pdf_path,
+            output_dir: &output_dir,
+            model_path: &model_path,
+            labels,
+            score_thresh: DEFAULT_SCORE_THRESH,
+            clip_budget: ClipRenderBudget::default(),
+            verify_with_codex: true,
+        },
+        &cancel,
+        |event| match event {
+            PipelineEvent::PageDetected { page_index, counts_by_kind, .. } => {
+                println!("page {page_index} detected: {counts_by_kind:?}");
+            }
+            PipelineEvent::ObjectExported { id, kind, page_index } => {
+                println!("exported {id} ({kind}) on page {page_index}");
+            }
+            PipelineEvent::ExtractionComplete { manifest_path, object_count } => {
+                println!("complete: {object_count} objects, manifest at {manifest_path:?}");
+            }
+        },
+    )
+    .expect("process_pdf with verify_with_codex failed");
+
+    assert!(!manifest.objects.is_empty(), "expected at least one object on ppo.pdf");
+
+    for entry in &manifest.objects {
+        let v = entry
+            .verification
+            .as_ref()
+            .unwrap_or_else(|| panic!("object {} missing verification info", entry.id));
+        assert!(v.enabled, "verification.enabled should be true when the feature was on");
+        assert!(v.attempts >= 1, "expected at least 1 attempt for {}", entry.id);
+        println!(
+            "{}: passed={} attempts={} last_issue={:?}",
+            entry.id, v.passed, v.attempts, v.last_issue
+        );
+    }
 }

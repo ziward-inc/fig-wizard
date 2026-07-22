@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::pdf::render::{render_clip, ClipRenderBudget};
-use crate::pipeline::types::{DetectedObject, ExportedFiles, Manifest, ManifestEntry};
+use crate::pipeline::types::{DetectedObject, ExportedFiles, Manifest, ManifestEntry, VerificationInfo};
 
 /// WebP encode at a fixed quality. Uses the `webp` crate (libwebp
 /// bindings), NOT `image`'s built-in WebP encoder, which only supports
@@ -88,8 +88,13 @@ pub fn export_object(
 }
 
 /// Builds a `ManifestEntry` from a `DetectedObject` and its exported file
-/// paths.
-pub fn manifest_entry(obj: &DetectedObject, files: ExportedFiles) -> ManifestEntry {
+/// paths. `verification` is `None` whenever the (off-by-default) Codex
+/// crop-verification pass wasn't enabled for this run.
+pub fn manifest_entry(
+    obj: &DetectedObject,
+    files: ExportedFiles,
+    verification: Option<VerificationInfo>,
+) -> ManifestEntry {
     let with_caption = obj.with_caption_bbox();
     ManifestEntry {
         id: obj.id.clone(),
@@ -101,6 +106,7 @@ pub fn manifest_entry(obj: &DetectedObject, files: ExportedFiles) -> ManifestEnt
         with_caption_bbox_pt: [with_caption.x0, with_caption.y0, with_caption.x1, with_caption.y1],
         has_caption: obj.caption_bbox_pt.is_some(),
         files,
+        verification,
     }
 }
 

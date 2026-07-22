@@ -2,6 +2,7 @@ pub mod commands;
 pub mod detect;
 pub mod pdf;
 pub mod pipeline;
+pub mod verify;
 
 use commands::AppState;
 
@@ -21,6 +22,7 @@ pub fn run() {
             commands::cancel_extraction,
             commands::list_results,
             commands::reveal_in_finder,
+            commands::codex_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
