@@ -1,15 +1,24 @@
 //! Per-object export: render both the object-only and object+caption
-//! crops (skipping the re-render when there's no caption), encode each to
-//! WebP q85 and AVIF q85, and write a `manifest.json` for the whole PDF.
+//! crops (skipping the re-render when there's no caption), encode each in
+//! the user-selected `OutputFormat` at quality 85 (or losslessly for PNG),
+//! and write a `manifest.json` for the whole PDF.
 
 use anyhow::{anyhow, Context, Result};
-use image::RgbImage;
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::PngEncoder;
+use image::{ExtendedColorType, ImageEncoder, RgbImage};
 use pdfium_render::prelude::PdfPage;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::pdf::render::{render_clip, ClipRenderBudget};
-use crate::pipeline::types::{DetectedObject, ExportedFiles, Manifest, ManifestEntry, VerificationInfo};
+use crate::pipeline::types::{
+    DetectedObject, ExportedFiles, Manifest, ManifestEntry, OutputFormat, VerificationInfo,
+};
+
+/// JPEG-style quality (0-100) applied to every lossy format. PNG is
+/// lossless and ignores this.
+const QUALITY: u8 = 85;
 
 /// WebP encode at a fixed quality. Uses the `webp` crate (libwebp
 /// bindings), NOT `image`'s built-in WebP encoder, which only supports
@@ -39,14 +48,46 @@ fn encode_avif(img: &RgbImage, quality: f32) -> Result<Vec<u8>> {
     Ok(result.avif_file)
 }
 
-/// Renders and encodes the four variants for one object, writing them
-/// under `<page_dir>/<kind>-NN_{with,no}-caption_q85.{webp,avif}`.
+/// PNG encode (lossless) via `image`'s built-in encoder - no quality knob.
+fn encode_png(img: &RgbImage) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    PngEncoder::new(&mut buf)
+        .write_image(img.as_raw(), img.width(), img.height(), ExtendedColorType::Rgb8)
+        .map_err(|e| anyhow!("png encode failed: {e}"))?;
+    Ok(buf)
+}
+
+/// JPEG encode at a fixed quality via `image`'s built-in encoder.
+fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    JpegEncoder::new_with_quality(&mut buf, quality)
+        .write_image(img.as_raw(), img.width(), img.height(), ExtendedColorType::Rgb8)
+        .map_err(|e| anyhow!("jpeg encode failed: {e}"))?;
+    Ok(buf)
+}
+
+/// Encodes `img` in the requested `format` at the app-wide fixed quality
+/// (`QUALITY` for lossy formats; ignored for PNG).
+fn encode(img: &RgbImage, format: OutputFormat) -> Result<Vec<u8>> {
+    match format {
+        OutputFormat::Webp => encode_webp(img, QUALITY as f32),
+        OutputFormat::Avif => encode_avif(img, QUALITY as f32),
+        OutputFormat::Png => encode_png(img),
+        OutputFormat::Jpeg => encode_jpeg(img, QUALITY),
+    }
+}
+
+/// Renders and encodes the with/without-caption variants for one object in
+/// the caller-selected `output_format`, writing them under
+/// `<page_dir>/<kind>-NN_{with,no}-caption[_q85].<ext>` (the `_q85` quality
+/// suffix is omitted for PNG, since it's lossless).
 pub fn export_object(
     page: &PdfPage,
     obj: &DetectedObject,
     page_dir: &Path,
     seq_in_page: u32,
     budget: ClipRenderBudget,
+    output_format: OutputFormat,
 ) -> Result<ExportedFiles> {
     fs::create_dir_all(page_dir)
         .with_context(|| format!("creating page output dir {page_dir:?}"))?;
@@ -69,10 +110,10 @@ pub fn export_object(
         no_caption_img.clone()
     };
 
-    let no_caption_webp_path = page_dir.join(format!("{base}_no-caption_q85.webp"));
-    let with_caption_webp_path = page_dir.join(format!("{base}_with-caption_q85.webp"));
-    let no_caption_avif_path = page_dir.join(format!("{base}_no-caption_q85.avif"));
-    let with_caption_avif_path = page_dir.join(format!("{base}_with-caption_q85.avif"));
+    let ext = output_format.extension();
+    let quality_suffix = if output_format.is_lossless() { "" } else { "_q85" };
+    let no_caption_path = page_dir.join(format!("{base}_no-caption{quality_suffix}.{ext}"));
+    let with_caption_path = page_dir.join(format!("{base}_with-caption{quality_suffix}.{ext}"));
 
     // `page_dir` is created up front, but re-assert it here too: if this
     // export follows a (possibly long, network-bound) verification pass,
@@ -81,20 +122,15 @@ pub fn export_object(
     // context rather than a bare unlabelled io::Error.
     fs::create_dir_all(page_dir).with_context(|| format!("re-creating page output dir {page_dir:?} before writing crops"))?;
 
-    fs::write(&no_caption_webp_path, encode_webp(&no_caption_img, 85.0)?)
-        .with_context(|| format!("writing {no_caption_webp_path:?}"))?;
-    fs::write(&with_caption_webp_path, encode_webp(&with_caption_img, 85.0)?)
-        .with_context(|| format!("writing {with_caption_webp_path:?}"))?;
-    fs::write(&no_caption_avif_path, encode_avif(&no_caption_img, 85.0)?)
-        .with_context(|| format!("writing {no_caption_avif_path:?}"))?;
-    fs::write(&with_caption_avif_path, encode_avif(&with_caption_img, 85.0)?)
-        .with_context(|| format!("writing {with_caption_avif_path:?}"))?;
+    fs::write(&no_caption_path, encode(&no_caption_img, output_format)?)
+        .with_context(|| format!("writing {no_caption_path:?}"))?;
+    fs::write(&with_caption_path, encode(&with_caption_img, output_format)?)
+        .with_context(|| format!("writing {with_caption_path:?}"))?;
 
     Ok(ExportedFiles {
-        with_caption_webp: with_caption_webp_path.to_string_lossy().to_string(),
-        no_caption_webp: no_caption_webp_path.to_string_lossy().to_string(),
-        with_caption_avif: with_caption_avif_path.to_string_lossy().to_string(),
-        no_caption_avif: no_caption_avif_path.to_string_lossy().to_string(),
+        format: output_format.as_str().to_string(),
+        with_caption: with_caption_path.to_string_lossy().to_string(),
+        no_caption: no_caption_path.to_string_lossy().to_string(),
     })
 }
 

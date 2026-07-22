@@ -24,7 +24,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::detect::DEFAULT_SCORE_THRESH;
 use crate::pdf::render::{init_pdfium, ClipRenderBudget};
 use crate::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
-use crate::pipeline::types::Manifest;
+use crate::pipeline::types::{Manifest, OutputFormat};
 use crate::verify;
 
 const MODEL_URL: &str =
@@ -277,9 +277,11 @@ pub async fn run_extraction(
     state: tauri::State<'_, AppState>,
     pdf_path: String,
     output_dir: String,
+    output_format: Option<OutputFormat>,
     verify_with_codex: Option<bool>,
 ) -> Result<String, String> {
     let verify_with_codex = verify_with_codex.unwrap_or(false);
+    let output_format = output_format.unwrap_or_default();
     let (model_path, labels) = resolve_model_and_labels(&app)?;
 
     // Preflight: if verification was requested, fail fast with a clear
@@ -325,6 +327,7 @@ Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
                     labels,
                     score_thresh: DEFAULT_SCORE_THRESH,
                     clip_budget: ClipRenderBudget::default(),
+                    output_format,
                     verify_with_codex,
                 },
                 &cancel,

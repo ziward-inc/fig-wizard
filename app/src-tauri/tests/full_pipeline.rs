@@ -6,6 +6,7 @@
 use app_lib::detect::DEFAULT_SCORE_THRESH;
 use app_lib::pdf::render::{init_pdfium, ClipRenderBudget};
 use app_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
+use app_lib::pipeline::types::OutputFormat;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -54,6 +55,7 @@ fn full_pipeline_on_attention_pdf() {
             labels,
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
+            output_format: OutputFormat::Webp,
             verify_with_codex: false,
         },
         &cancel,
@@ -81,17 +83,15 @@ fn full_pipeline_on_attention_pdf() {
     assert!(kinds_seen.contains("figure"), "expected at least one figure on attention.pdf");
     assert!(kinds_seen.contains("formula"), "expected at least one formula on attention.pdf");
 
-    // Every manifest entry's four files must actually exist on disk and be
-    // non-trivially sized (i.e. not empty/corrupt encodes).
+    // Every manifest entry's two files (with/without caption, in the
+    // run's single selected format - WebP here) must actually exist on
+    // disk and be non-trivially sized (i.e. not empty/corrupt encodes).
     for entry in &manifest.objects {
-        for path in [
-            &entry.files.with_caption_webp,
-            &entry.files.no_caption_webp,
-            &entry.files.with_caption_avif,
-            &entry.files.no_caption_avif,
-        ] {
+        assert_eq!(entry.files.format, "webp", "unexpected format for {}", entry.id);
+        for path in [&entry.files.with_caption, &entry.files.no_caption] {
             let meta = std::fs::metadata(path).unwrap_or_else(|e| panic!("missing file {path}: {e}"));
             assert!(meta.len() > 100, "suspiciously small file {path}: {} bytes", meta.len());
+            assert!(path.ends_with(".webp"), "expected .webp extension: {path}");
         }
     }
 
@@ -143,6 +143,7 @@ fn verify_with_codex_on_ppo_pdf() {
             labels,
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
+            output_format: OutputFormat::Webp,
             verify_with_codex: true,
         },
         &cancel,
@@ -169,9 +170,27 @@ fn verify_with_codex_on_ppo_pdf() {
             .unwrap_or_else(|| panic!("object {} missing verification info", entry.id));
         assert!(v.enabled, "verification.enabled should be true when the feature was on");
         assert!(v.attempts >= 1, "expected at least 1 attempt for {}", entry.id);
+        assert_eq!(
+            v.history.len() as u32,
+            v.attempts,
+            "history length should match attempts for {}",
+            entry.id
+        );
+        assert_eq!(
+            v.history.last().map(|a| a.issue.clone()),
+            v.last_issue,
+            "history's last entry should match last_issue for {}",
+            entry.id
+        );
         println!(
             "{}: passed={} attempts={} last_issue={:?}",
             entry.id, v.passed, v.attempts, v.last_issue
         );
+        for a in &v.history {
+            println!(
+                "  attempt {}: passed={} issue={} reason={} bbox_adjustment_pt={:?}",
+                a.attempt, a.passed, a.issue, a.reason, a.bbox_adjustment_pt
+            );
+        }
     }
 }

@@ -8,11 +8,17 @@
 //!
 //! This module is purely additive: any failure to invoke/parse Codex
 //! (binary missing, auth error, timeout, malformed JSON) is treated as a
-//! *soft* failure - it consumes an attempt and is recorded in
-//! `VerifyOutcome::last_issue` as `"verification_error: ..."`, but never
+//! *soft* failure - it consumes an attempt and is recorded (both in
+//! `VerifyOutcome::last_issue` and as its own entry in
+//! `VerifyOutcome::history`) as `"verification_error: ..."`, but never
 //! propagates as a hard `Err` that would abort the whole extraction job.
 //! The only `Err` this module returns is for a real rendering failure
 //! (`pdf::render::render_clip`), which would fail the export anyway.
+//!
+//! Every attempt - passed, corrected-and-retried, soft-failed, or
+//! cancelled - gets one entry in `VerifyOutcome::history`, so callers (the
+//! manifest, the results-gallery modal) can see exactly what happened on
+//! every retry, not just the final one.
 //!
 //! Sign convention for `bbox_adjustment_pt` (mirrors the explicit PDF-point
 //! Y-flip convention already established in `pdf::render` /
@@ -41,7 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::pdf::render::{page_geometry, render_clip, ClipRenderBudget};
-use crate::pipeline::types::BBoxPt;
+use crate::pipeline::types::{BBoxPt, VerificationAttempt};
 
 /// Total attempts per object: 1 initial check + up to 2 corrective
 /// re-renders. Named/exported so it's easy to find and tune.
@@ -100,14 +106,30 @@ const VERIFY_SCHEMA_JSON: &str = r#"{
 "#;
 
 /// Result of running `verify_and_correct_crop` for one object: how many
-/// attempts it took, whether it ultimately passed, and the last-seen
-/// issue/reason (useful for both the manifest and debugging).
+/// attempts it took, whether it ultimately passed, the last-seen
+/// issue/reason (useful for both the manifest and debugging), and the full
+/// per-attempt `history` (one entry per real attempt, in order - see
+/// `VerificationAttempt`). `attempts`/`last_issue`/`last_reason` are
+/// convenience fields derived from `history` (`attempts == history.len()`,
+/// `last_issue`/`last_reason` mirror `history.last()`) so existing call
+/// sites that only care about the summary don't need to touch the vec.
 #[derive(Debug, Clone)]
 pub struct VerifyOutcome {
     pub passed: bool,
     pub attempts: u32,
     pub last_issue: Option<String>,
     pub last_reason: Option<String>,
+    pub history: Vec<VerificationAttempt>,
+}
+
+/// Builds a `VerifyOutcome` from an in-progress `history` vec, deriving
+/// `attempts`/`last_issue`/`last_reason` from it so every return path stays
+/// consistent (see `VerifyOutcome` doc comment).
+fn finish_outcome(history: Vec<VerificationAttempt>, passed: bool) -> VerifyOutcome {
+    let attempts = history.len() as u32;
+    let last_issue = history.last().map(|a| a.issue.clone());
+    let last_reason = history.last().map(|a| a.reason.clone());
+    VerifyOutcome { passed, attempts, last_issue, last_reason, history }
 }
 
 /// One parsed Codex response, matching `VERIFY_SCHEMA_JSON`.
@@ -134,7 +156,7 @@ struct BboxAdjustment {
 pub fn codex_available() -> Result<String, String> {
     let mut cmd = Command::new("codex");
     cmd.arg("--version");
-    match run_with_timeout(cmd, Duration::from_secs(10)) {
+    match run_with_timeout(cmd, Duration::from_secs(10), true) {
         Ok(output) if output.status.success() => {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
@@ -174,14 +196,7 @@ pub fn verify_and_correct_crop(
 
     let geometry = page_geometry(page);
     let mut current_bbox = initial_bbox_pt;
-    // Always overwritten before being read on every loop path (the
-    // cancellation early-return builds its own inline `last_issue`); kept
-    // as `Option` here only so the compiler doesn't need attempt-count
-    // reasoning to prove they're initialized by the time the loop returns.
-    #[allow(unused_assignments)]
-    let mut last_issue: Option<String> = None;
-    #[allow(unused_assignments)]
-    let mut last_reason: Option<String> = None;
+    let mut history: Vec<VerificationAttempt> = Vec::new();
 
     let max_attempts = max_attempts.max(1);
 
@@ -189,18 +204,20 @@ pub fn verify_and_correct_crop(
         if cancel.load(Ordering::Relaxed) {
             // Bail out of the verify loop early; report what we have as an
             // unverified (not-passed) result rather than block cancellation.
+            // No real attempt ran this iteration (the check happens before
+            // any render/Codex call), but we still record a history entry
+            // so a manifest reader can see that cancellation - not a Codex
+            // verdict - is why the loop stopped here.
             let img = render_clip(page, current_bbox, budget)
                 .with_context(|| "rendering clip after cancellation during verify")?;
-            return Ok((
-                img,
-                current_bbox,
-                VerifyOutcome {
-                    passed: false,
-                    attempts: attempt.saturating_sub(1).max(1),
-                    last_issue: Some("cancelled".to_string()),
-                    last_reason,
-                },
-            ));
+            history.push(VerificationAttempt {
+                attempt,
+                passed: false,
+                issue: "cancelled".to_string(),
+                reason: "extraction was cancelled before this verification attempt ran".to_string(),
+                bbox_adjustment_pt: None,
+            });
+            return Ok((img, current_bbox, finish_outcome(history, false)));
         }
 
         let img = render_clip(page, current_bbox, budget)
@@ -215,33 +232,35 @@ pub fn verify_and_correct_crop(
 
         match run_codex_verify(&image_path, &schema_path, &output_path, work_dir, &prompt) {
             Ok(result) => {
-                last_issue = Some(result.issue.clone());
-                last_reason = Some(result.reason.clone());
+                // Record the RAW suggestion (before capping/clamping) so the
+                // history reflects what Codex actually said, not what we
+                // did with it - `None` when it passed (schema says all four
+                // adjustment values are 0 in that case, but semantically
+                // "no adjustment was needed" reads better than `Some([0;4])`).
+                let bbox_adjustment_pt = if result.passed {
+                    None
+                } else {
+                    Some([
+                        result.bbox_adjustment_pt.top,
+                        result.bbox_adjustment_pt.bottom,
+                        result.bbox_adjustment_pt.left,
+                        result.bbox_adjustment_pt.right,
+                    ])
+                };
+                history.push(VerificationAttempt {
+                    attempt,
+                    passed: result.passed,
+                    issue: result.issue.clone(),
+                    reason: result.reason.clone(),
+                    bbox_adjustment_pt,
+                });
 
                 if result.passed {
-                    return Ok((
-                        img,
-                        current_bbox,
-                        VerifyOutcome {
-                            passed: true,
-                            attempts: attempt,
-                            last_issue,
-                            last_reason,
-                        },
-                    ));
+                    return Ok((img, current_bbox, finish_outcome(history, true)));
                 }
 
                 if attempt == max_attempts {
-                    return Ok((
-                        img,
-                        current_bbox,
-                        VerifyOutcome {
-                            passed: false,
-                            attempts: attempt,
-                            last_issue,
-                            last_reason,
-                        },
-                    ));
+                    return Ok((img, current_bbox, finish_outcome(history, false)));
                 }
 
                 current_bbox =
@@ -253,18 +272,15 @@ pub fn verify_and_correct_crop(
                 // same bbox if attempts remain, else fall back to returning
                 // the current (unverified) crop.
                 let msg = format!("verification_error: {e:#}");
-                last_issue = Some(msg.clone());
+                history.push(VerificationAttempt {
+                    attempt,
+                    passed: false,
+                    issue: msg,
+                    reason: String::new(),
+                    bbox_adjustment_pt: None,
+                });
                 if attempt == max_attempts {
-                    return Ok((
-                        img,
-                        current_bbox,
-                        VerifyOutcome {
-                            passed: false,
-                            attempts: attempt,
-                            last_issue,
-                            last_reason,
-                        },
-                    ));
+                    return Ok((img, current_bbox, finish_outcome(history, false)));
                 }
                 // else: loop again at the same bbox.
             }
@@ -369,7 +385,7 @@ fn run_codex_verify(
         .arg(work_dir)
         .arg(prompt);
 
-    let output = run_with_timeout(cmd, Duration::from_secs(CODEX_TIMEOUT_SECS))
+    let output = run_with_timeout(cmd, Duration::from_secs(CODEX_TIMEOUT_SECS), false)
         .map_err(|e| anyhow::anyhow!("running codex exec: {e}"))?;
 
     if !output.status.success() {
@@ -388,16 +404,33 @@ fn run_codex_verify(
 }
 
 /// Spawns `cmd` and waits for it with a hard wall-clock cap, killing it if
-/// exceeded. stdout is discarded (codex's chatty transcript isn't needed -
-/// we read the structured result from `-o` instead); stderr is drained on a
-/// background thread so a large stderr buffer can never deadlock the poll
-/// loop against a full pipe.
-fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<std::process::Output, String> {
+/// exceeded. stderr is always drained on a background thread so a large
+/// stderr buffer can never deadlock the poll loop against a full pipe.
+/// stdout is drained the same way only when `capture_stdout` is set - the
+/// main `codex exec` verification calls don't need it (the structured
+/// result is read from the `-o` file instead, and the chatty transcript can
+/// be large), but the quick `codex --version` preflight check does, to
+/// surface the version string to the UI.
+fn run_with_timeout(
+    mut cmd: Command,
+    timeout: Duration,
+    capture_stdout: bool,
+) -> Result<std::process::Output, String> {
     cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::null());
+    cmd.stdout(if capture_stdout { Stdio::piped() } else { Stdio::null() });
     cmd.stderr(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+
+    let mut stdout_pipe = child.stdout.take();
+    let stdout_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stdout_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
     let mut stderr_pipe = child.stderr.take();
     let stderr_handle = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -415,24 +448,23 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<std::process:
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = stdout_handle.join();
                     let _ = stderr_handle.join();
                     return Err(format!("codex exec timed out after {}s", timeout.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }
             Err(e) => {
+                let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
                 return Err(e.to_string());
             }
         }
     };
 
+    let stdout = stdout_handle.join().unwrap_or_default();
     let stderr = stderr_handle.join().unwrap_or_default();
-    Ok(std::process::Output {
-        status,
-        stdout: Vec::new(),
-        stderr,
-    })
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
 #[cfg(test)]

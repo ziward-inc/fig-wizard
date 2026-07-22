@@ -92,6 +92,12 @@ fn verify_single_algorithm_crop() {
         outcome.passed, outcome.attempts, outcome.last_issue, outcome.last_reason, start.elapsed()
     );
     println!("corrected bbox_pt: {corrected_bbox:?}");
+    for a in &outcome.history {
+        println!(
+            "  attempt {}: passed={} issue={} reason={} bbox_adjustment_pt={:?}",
+            a.attempt, a.passed, a.issue, a.reason, a.bbox_adjustment_pt
+        );
+    }
 
     assert!(outcome.attempts >= 1, "expected at least 1 real attempt");
     assert!(
@@ -103,4 +109,26 @@ fn verify_single_algorithm_crop() {
         "expected a real Codex response, not an error: {:?}",
         outcome.last_issue
     );
+
+    // The new per-attempt history should be populated and consistent with
+    // the derived summary fields (see `verify::finish_outcome`).
+    assert!(!outcome.history.is_empty(), "expected at least 1 history entry");
+    assert_eq!(
+        outcome.history.len() as u32,
+        outcome.attempts,
+        "history length should match attempts"
+    );
+    assert_eq!(
+        outcome.history.last().map(|a| a.issue.clone()),
+        outcome.last_issue,
+        "history's last entry should match last_issue"
+    );
+    let last_attempt = outcome.history.last().expect("checked non-empty above");
+    assert_eq!(last_attempt.passed, outcome.passed, "history's last entry should match overall passed");
+    if last_attempt.passed {
+        assert!(
+            last_attempt.bbox_adjustment_pt.is_none(),
+            "a passed attempt should have no bbox adjustment recorded"
+        );
+    }
 }

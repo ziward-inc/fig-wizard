@@ -1,8 +1,9 @@
 # PDF Paper Image Extractor
 
 A macOS-only Tauri app that extracts figures, tables, formulas, and algorithm/pseudocode
-blocks from academic paper PDFs, exporting each as near-4K WebP and AVIF images (quality
-85), with and without an associated caption.
+blocks from academic paper PDFs, exporting each as a near-4K crop in **one** user-selected
+image format (WebP, AVIF, PNG, or JPEG - quality 85 for the lossy ones), with and without
+an associated caption.
 
 ## Running it
 
@@ -31,13 +32,93 @@ is compiled out of release builds.
 1. Drag a PDF onto the drop zone (or click "Choose PDF…").
 2. Pick an output folder (defaults to an `extracted/` folder next to the PDF; override with
    "Choose output folder…").
-3. Click "Extract" and watch the live per-page progress and running counts by kind.
-4. When done, browse the results gallery (grouped by page, click a thumbnail for the full
-   crop plus all 4 output file paths and a "Reveal in Finder" action).
+3. Choose an output format: **WebP, AVIF, PNG, or JPEG** (radio buttons - exactly one is
+   active per run). **WebP is the default.** JPEG XL is listed but permanently greyed
+   out/disabled - see "JPEG XL: investigated, not shipped" below for why.
+4. Click "Extract" and watch the live per-page progress and running counts by kind.
+5. When done, browse the results gallery (grouped by page, click a thumbnail for the full
+   crop plus both output file paths and a "Reveal in Finder" action).
 
-Extraction writes to `<output_dir>/<pdf-stem>/page-NNNN/<kind>-NN_{with,no}-caption_q85.{webp,avif}`
-plus a `manifest.json` describing every exported object (kind, page, bbox, score, caption
-association, file paths).
+Extraction writes to
+`<output_dir>/<pdf-stem>/page-NNNN/<kind>-NN_{with,no}-caption_q85.<ext>` for the lossy
+formats (`webp`/`avif`/`jpg`) or `<kind>-NN_{with,no}-caption.png` (no quality suffix,
+since PNG is lossless) for PNG, plus a `manifest.json` describing every exported object
+(kind, page, bbox, score, caption association, file paths).
+
+### Picking a different format per run
+
+Every extraction run produces exactly **2 files per object** (with-caption and
+no-caption) in the single format selected in step 3 above - not 4 files in two fixed
+formats like earlier versions of this app. Re-running extraction on the same PDF with a
+different format selected will (over)write a fresh set of files (and a fresh
+`manifest.json`) using that format.
+
+**Gallery preview limitation:** the results gallery's thumbnails and modal preview try to
+render every format inline via an `<img>` tag. In practice, PNG/JPEG/WebP display reliably
+in Tauri's WKWebView on macOS 15+; **AVIF's inline support has been inconsistent across
+WebKit/Safari versions** and isn't something this app can guarantee ahead of time. Rather
+than hardcode per-format support (which would silently go stale as WebKit changes), the
+gallery detects a real image-load failure per-file and falls back to a generic file-icon +
+filename placeholder for that thumbnail/preview - "Reveal in Finder" still works
+regardless. If you pick AVIF and see placeholder icons instead of thumbnails, that's this
+fallback kicking in, not a bug in the export itself (the files are still valid AVIF - see
+the manifest and try opening one directly).
+
+### `manifest.json` schema change: `files` shape
+
+**Breaking change.** Every manifest entry's `files` field used to always be:
+
+```json
+"files": {
+  "with_caption_webp": "...", "no_caption_webp": "...",
+  "with_caption_avif": "...", "no_caption_avif": "..."
+}
+```
+
+It is now:
+
+```json
+"files": { "format": "webp", "with_caption": "...", "no_caption": "..." }
+```
+
+`format` is one of `"webp"`, `"avif"`, `"png"`, `"jpeg"` (lowercase, matching the radio
+button values). Old manifests from before this change will fail to parse against the new
+`ExportedFiles` struct - this is intentional (no dual-schema fallback was added, to avoid
+silently reading stale data as if it were current); re-run extraction to get a manifest in
+the new shape.
+
+### JPEG XL: investigated, not shipped
+
+JPEG XL was evaluated as a 5th output format. The specific crate required for this
+investigation, **`jxl-rs`** (`libjxl/jxl-rs` on GitHub - a from-scratch pure-Rust
+reimplementation maintained by the JPEG XL/libjxl team), is, as of this writing, an
+**explicitly decode-only, work-in-progress JPEG XL decoder**: its own README states "This
+is a work-in-progress reimplementation of a JPEG XL **decoder** in Rust," its `jxl` crate
+has no `encode` module anywhere in its source tree (only `frame`/`headers`/`render`/
+`entropy_coding`/`color`/etc - all decode-pipeline stages), and it isn't published on
+crates.io under that name at all (would require a git dependency). There is no encoding
+capability to wire up.
+
+Separately, as a spike, the crate **`jpegxl-rs`** (safe Rust bindings to the real,
+reference `libjxl`, with a `vendored` Cargo feature that builds `libjxl` from source so
+end users don't need `brew install jpeg-xl`) was tried and **does work**: it successfully
+built libjxl from source in this environment, encoded a real crop
+(`tests/output/ppo_algorithm_crop.png`) to a valid `.jxl` file (verified via magic bytes
+`FF 0A`, macOS `sips`/`file` recognizing it as "JPEG XL codestream", a full decode
+round-trip confirming matching dimensions, and a visual check converting it back to PNG),
+using `.jpeg_quality(85.0)` (the crate's own JPEG-style-quality-to-butteraugli-distance
+conversion, for direct comparability with the quality=85 used everywhere else). However,
+`jpegxl-rs` is **not** the crate specified for this feature, and it is licensed
+**GPL-3.0-or-later** (vendoring/linking it would make a *distributed* build of this app
+subject to GPL-3.0 copyleft - libjxl itself is BSD-3, but these particular Rust bindings
+are GPL). Substituting it without authorization would also be a scope violation, not just
+a licensing question. So: JPEG XL ships in **none** of the 5 originally-considered formats;
+the app ships WebP/AVIF/PNG/JPEG. The picker still lists "JPEG XL" so this decision is
+visible in the UI, permanently disabled with a tooltip explaining why (see `index.html`'s
+`#format-picker`).
+
+If JPEG XL is wanted later: either wait for `jxl-rs` to grow encode support upstream, or
+make an explicit, informed call to take on the `jpegxl-rs` GPL-3.0 dependency instead.
 
 ## Optional: verify crops with Codex (off by default)
 
@@ -70,19 +151,42 @@ schema, whether the crop is a clean, complete, standalone image of that object:
   available at all.
 
 **Per-object attempt counts are always visible when this feature was used**: `manifest.json`
-gets a `verification: { enabled, attempts, passed, last_issue }` field per object (absent
-entirely when the checkbox was off for that run), and the results gallery shows a small
-badge on each thumbnail/modal - "✓ 1 try" (passed first try), "⟳ N tries" (passed after
-Codex-suggested corrections), or "⚠ N tries, still flagged" (never passed within the
+gets a `verification: { enabled, attempts, passed, last_issue, history }` field per object
+(absent entirely when the checkbox was off for that run), and the results gallery shows a
+small badge on each thumbnail/modal - "✓ 1 try" (passed first try), "⟳ N tries" (passed
+after Codex-suggested corrections), or "⚠ N tries, still flagged" (never passed within the
 attempt budget). No badge is shown at all when verification wasn't enabled for that run.
+
+**Full per-attempt history, not just the final outcome.** `verification.history` is an
+array with one entry per real attempt (in order), each shaped like:
+
+```json
+{ "attempt": 1, "passed": false, "issue": "extra_content_top", "reason": "...", "bbox_adjustment_pt": [12.0, 0.0, 0.0, 0.0] }
+```
+
+(`bbox_adjustment_pt` is `[top, bottom, left, right]` in PDF points - Codex's *raw*
+suggestion for that attempt, before the app's capping/clamping is applied; it's `null` on
+a passed attempt, or on a soft failure where Codex itself couldn't be invoked/parsed - see
+`"verification_error: ..."` issues below.) `attempts`/`passed`/`last_issue` are still
+present as convenience fields summarizing the same data (`attempts == history.length`,
+`last_issue` mirrors the last history entry's `issue`) so anything that only needs the
+summary doesn't need to touch the array. In the results gallery, clicking a thumbnail opens
+the modal as before, which now also has an expandable "Attempt history (N)" section listing
+every attempt ("Attempt 1: extra_content_top - <reason>", "Attempt 2: passed - <reason>",
+etc.) so you can see exactly why each retry happened, not just how many there were.
 
 ## Known limitations / gaps (read before filing a bug)
 
 - **Extraction is slow.** This is a CPU-bound pipeline: ONNX layout detection per page plus
-  near-4K AVIF encoding per object, no GPU acceleration. A 15-page paper with ~17 extracted
-  objects takes on the order of ten-plus minutes on a laptop CPU. The UI treats this as a
-  real background job (live progress events, cancellable) rather than pretending it's fast
-  — expect multi-minute runs on longer papers, and plan to let it run in the background.
+  near-4K image encoding per object (AVIF is the slowest of the 4 shipped formats to
+  encode; PNG/JPEG/WebP are faster), no GPU acceleration. A 15-page paper with ~17
+  extracted objects takes on the order of ten-plus minutes on a laptop CPU with AVIF
+  selected. The UI treats this as a real background job (live progress events,
+  cancellable) rather than pretending it's fast — expect multi-minute runs on longer
+  papers, and plan to let it run in the background. Note that since each run now only
+  encodes ONE format instead of always doing both WebP and AVIF, actual per-object encode
+  time is generally lower than in earlier versions of this app, particularly for the
+  faster formats.
 - **No code-snippet class.** The detection model (PP-DocLayoutV3) has no dedicated "code
   block" label distinct from prose. Inline source-code snippets get bucketed under the
   `algorithm` class (or missed entirely if they don't look like a boxed/numbered algorithm
@@ -96,7 +200,7 @@ attempt budget). No badge is shown at all when verification wasn't enabled for t
   threshold). When no caption/number box is associable, the object is still exported with
   both a `_with-caption_` and a `_no-caption_` file — they're just byte-identical crops
   (the with-caption render is skipped and the no-caption bitmap is reused). This is
-  expected behavior, not a bug: every object always has all 4 files, `has_caption: false`
+  expected behavior, not a bug: every object always has both files, `has_caption: false`
   in `manifest.json` tells you when they're duplicates.
 - **No checksum verification on downloaded assets.** `download_model` streams the model,
   its config, and the PDFium archive straight to disk with no SHA-256 check against a known

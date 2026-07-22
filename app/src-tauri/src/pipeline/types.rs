@@ -145,13 +145,95 @@ impl DetectedObject {
     }
 }
 
-/// Paths to the four exported image variants for one detected object.
+/// Which single image format a run's crops are exported as. Exactly one is
+/// chosen per extraction run (see `pipeline::run::ProcessPdfParams::output_format`) -
+/// this app used to always export both WebP and AVIF (4 files/object); now
+/// the user picks one format and gets 2 files/object (with/without caption).
+///
+/// JPEG XL is deliberately NOT a variant here: the crate the user specified
+/// for this (`jxl-rs`, i.e. `libjxl/jxl-rs` on GitHub) is, as of this
+/// writing, an explicitly decode-only, work-in-progress reimplementation of
+/// a JPEG XL decoder ("This is a work-in-progress reimplementation of a
+/// JPEG XL decoder in Rust" per its own README) with no encode module in
+/// its source tree at all, and it isn't even published on crates.io under
+/// that name. A different crate (`jpegxl-rs`, GPL-3.0-or-later bindings to
+/// the real libjxl, with a `vendored` build feature) WAS spiked separately
+/// and does encode/decode real JPEG XL files correctly - but since it's not
+/// the crate that was authorized for this feature, it isn't wired in here.
+/// See README.md's "Known limitations" section for the full writeup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    Webp,
+    Avif,
+    Png,
+    Jpeg,
+}
+
+impl OutputFormat {
+    /// File extension (no leading dot) used in output filenames.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            OutputFormat::Webp => "webp",
+            OutputFormat::Avif => "avif",
+            OutputFormat::Png => "png",
+            OutputFormat::Jpeg => "jpg",
+        }
+    }
+
+    /// Lowercase string form, matching the `#[serde(rename_all = "lowercase")]`
+    /// wire format the frontend sends/receives (`ExportedFiles::format`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OutputFormat::Webp => "webp",
+            OutputFormat::Avif => "avif",
+            OutputFormat::Png => "png",
+            OutputFormat::Jpeg => "jpeg",
+        }
+    }
+
+    /// PNG is lossless, so its filenames skip the `_qNN` quality suffix that
+    /// the other (lossy) formats carry.
+    pub fn is_lossless(&self) -> bool {
+        matches!(self, OutputFormat::Png)
+    }
+}
+
+impl Default for OutputFormat {
+    /// WebP was the primary/first-listed format before this feature existed,
+    /// so it's the default when a run doesn't specify one (and the frontend
+    /// picker's default selection).
+    fn default() -> Self {
+        OutputFormat::Webp
+    }
+}
+
+/// Paths to the two exported image variants (with/without caption) for one
+/// detected object, both in the same user-selected `OutputFormat`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportedFiles {
-    pub with_caption_webp: String,
-    pub no_caption_webp: String,
-    pub with_caption_avif: String,
-    pub no_caption_avif: String,
+    /// Lowercase format name (`"webp"`, `"avif"`, `"png"`, `"jpeg"`) - see
+    /// `OutputFormat::as_str`.
+    pub format: String,
+    pub with_caption: String,
+    pub no_caption: String,
+}
+
+/// One attempt's outcome within a single object's Codex crop-verification
+/// loop (see `verify::verify_and_correct_crop`). `bbox_adjustment_pt`, when
+/// present, is `[top, bottom, left, right]` in PDF points - the RAW
+/// suggestion Codex made for that attempt (before the capping/clamping
+/// `verify::apply_adjustment` applies), using the same sign convention
+/// documented in `verify/mod.rs` (positive = expand outward on that side).
+/// `None` when the attempt passed (no adjustment needed) or when it was a
+/// soft failure that never produced a parsed Codex response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationAttempt {
+    pub attempt: u32,
+    pub passed: bool,
+    pub issue: String,
+    pub reason: String,
+    pub bbox_adjustment_pt: Option<[f32; 4]>,
 }
 
 /// One manifest entry: everything an external tool/reviewer needs to know
@@ -166,6 +248,14 @@ pub struct VerificationInfo {
     pub attempts: u32,
     pub passed: bool,
     pub last_issue: Option<String>,
+    /// Every attempt's outcome, in order (index 0 = attempt 1), so a
+    /// manifest reader can see exactly what happened - and why - on every
+    /// retry, not just the final one. `attempts`/`passed`/`last_issue` above
+    /// are convenience fields derived from this (kept for callers that don't
+    /// need the full detail); `attempts == history.len()` and
+    /// `last_issue == history.last().map(|a| &a.issue)` always hold.
+    #[serde(default)]
+    pub history: Vec<VerificationAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,6 +22,9 @@ const pdfInfo = document.querySelector("#pdf-info");
 const chooseOutputBtn = document.querySelector("#choose-output-btn");
 const outputDirLabel = document.querySelector("#output-dir-label");
 
+const formatPicker = document.querySelector("#format-picker");
+const formatRadios = formatPicker.querySelectorAll('input[name="output-format"]');
+
 const verifyCheckbox = document.querySelector("#verify-checkbox");
 const verifyHint = document.querySelector("#verify-hint");
 const codexStatusLine = document.querySelector("#codex-status-line");
@@ -73,6 +76,15 @@ function formatBytes(n) {
 
 function setHidden(el, hidden) {
   el.classList.toggle("hidden", hidden);
+}
+
+// Reads the currently-selected radio in the format picker (defaults to
+// "webp" - the pre-existing radio has `checked` in index.html, so this
+// should always find one, but the fallback keeps `run_extraction` from
+// ever being called with `undefined`).
+function selectedOutputFormat() {
+  const checked = formatPicker.querySelector('input[name="output-format"]:checked');
+  return checked ? checked.value : "webp";
 }
 
 // ---- Model status ---------------------------------------------------------
@@ -228,6 +240,15 @@ function updateExtractButtonState() {
   // different PDF while an extraction is using it isn't safe.
   choosePdfBtn.disabled = busy;
   dropZone.classList.toggle("busy", busy);
+
+  // The selected format only takes effect at the start of a run - lock it
+  // while one is in flight so it can't be changed mid-extraction. The
+  // "jpegxl" radio stays permanently disabled regardless (see index.html) -
+  // it's not wired to a working encoder, see README.
+  for (const radio of formatRadios) {
+    if (radio.value === "jpegxl") continue;
+    radio.disabled = busy;
+  }
 }
 
 // ---- Extraction lifecycle -----------------------------------------------
@@ -246,6 +267,7 @@ extractBtn.addEventListener("click", async () => {
     currentJobId = await invoke("run_extraction", {
       pdfPath: currentPdf.path,
       outputDir: currentOutputDir,
+      outputFormat: selectedOutputFormat(),
       verifyWithCodex: verifyCheckbox.checked,
     });
   } catch (e) {
@@ -364,6 +386,51 @@ function renderGallery(manifest) {
   }
 }
 
+// Display name for the lowercase format strings in `manifest.json`'s
+// `files.format` (see `OutputFormat::as_str` on the Rust side).
+const FORMAT_LABELS = { webp: "WebP", avif: "AVIF", png: "PNG", jpeg: "JPEG" };
+function formatLabel(format) {
+  return FORMAT_LABELS[format] || format;
+}
+
+function basename(path) {
+  return path.split("/").pop() || path;
+}
+
+// Builds an <img> that previews `path` via `convertFileSrc`, but - since not
+// every shipped format is guaranteed to render inline in every WebView
+// (WKWebView's AVIF support in particular has been inconsistent across
+// macOS/WebKit versions) - falls back to a generic file-icon + filename
+// placeholder if the image actually fails to load, rather than leaving a
+// broken-image icon or assuming support up front. This is checked
+// empirically per-image (via the `error` event) rather than hardcoded per
+// format, so it degrades gracefully regardless of the exact WebView
+// version's format support.
+function createPreviewElement(path, altText, imgClassName) {
+  const img = document.createElement("img");
+  if (imgClassName) img.className = imgClassName;
+  img.src = convertFileSrc(path);
+  img.alt = altText;
+  img.addEventListener(
+    "error",
+    () => {
+      const placeholder = document.createElement("div");
+      placeholder.className = `preview-placeholder${imgClassName ? ` ${imgClassName}` : ""}`;
+      const icon = document.createElement("span");
+      icon.className = "preview-placeholder-icon";
+      icon.textContent = "🗎";
+      const name = document.createElement("span");
+      name.className = "preview-placeholder-name";
+      name.textContent = basename(path);
+      placeholder.appendChild(icon);
+      placeholder.appendChild(name);
+      img.replaceWith(placeholder);
+    },
+    { once: true }
+  );
+  return img;
+}
+
 // Builds the small "N tries" verification badge shown on a thumbnail/modal
 // when the (off-by-default) Codex verification feature was enabled for the
 // run that produced `entry`. Returns null (render nothing) when
@@ -393,14 +460,39 @@ function verificationBadge(entry) {
   return badge;
 }
 
+// Builds an expandable (native <details>/<summary>, no extra JS needed for
+// toggling) list of every recorded verification attempt - not just the
+// final outcome the badge summarizes - so a user can read exactly why each
+// retry happened. Returns null when there's no history to show (feature
+// off, or an old manifest from before this field existed).
+function verificationHistory(entry) {
+  const v = entry.verification;
+  if (!v || !v.enabled || !v.history || v.history.length === 0) return null;
+
+  const details = document.createElement("details");
+  details.className = "verify-history";
+
+  const summary = document.createElement("summary");
+  summary.textContent = `Attempt history (${v.history.length})`;
+  details.appendChild(summary);
+
+  const list = document.createElement("ul");
+  for (const a of v.history) {
+    const li = document.createElement("li");
+    const label = a.passed ? "passed" : a.issue;
+    li.textContent = `Attempt ${a.attempt}: ${label}${a.reason ? ` - ${a.reason}` : ""}`;
+    list.appendChild(li);
+  }
+  details.appendChild(list);
+  return details;
+}
+
 function renderThumb(entry) {
   const card = document.createElement("button");
   card.type = "button";
   card.className = `thumb-card kind-${entry.kind}`;
 
-  const img = document.createElement("img");
-  img.src = convertFileSrc(entry.files.with_caption_webp);
-  img.alt = `${entry.kind} on page ${entry.page_index + 1}`;
+  const img = createPreviewElement(entry.files.with_caption, `${entry.kind} on page ${entry.page_index + 1}`, null);
   card.appendChild(img);
 
   const badge = verificationBadge(entry);
@@ -418,9 +510,11 @@ function renderThumb(entry) {
 function openObjectModal(entry) {
   modalBody.innerHTML = "";
 
-  const img = document.createElement("img");
-  img.className = "modal-image";
-  img.src = convertFileSrc(entry.files.with_caption_webp);
+  const img = createPreviewElement(
+    entry.files.with_caption,
+    `${entry.kind} on page ${entry.page_index + 1}`,
+    "modal-image"
+  );
   modalBody.appendChild(img);
 
   const title = document.createElement("h3");
@@ -433,6 +527,9 @@ function openObjectModal(entry) {
     modalBody.appendChild(modalBadge);
   }
 
+  const history = verificationHistory(entry);
+  if (history) modalBody.appendChild(history);
+
   if (!entry.has_caption) {
     const note = document.createElement("p");
     note.className = "info-line";
@@ -442,11 +539,10 @@ function openObjectModal(entry) {
 
   const fileList = document.createElement("div");
   fileList.className = "file-list";
+  const formatName = formatLabel(entry.files.format);
   const files = [
-    ["With caption · WebP", entry.files.with_caption_webp],
-    ["No caption · WebP", entry.files.no_caption_webp],
-    ["With caption · AVIF", entry.files.with_caption_avif],
-    ["No caption · AVIF", entry.files.no_caption_avif],
+    [`With caption · ${formatName}`, entry.files.with_caption],
+    [`No caption · ${formatName}`, entry.files.no_caption],
   ];
   for (const [label, path] of files) {
     const row = document.createElement("div");

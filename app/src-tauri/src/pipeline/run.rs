@@ -12,7 +12,7 @@ use crate::detect::{DocLayoutModel, TARGET_SIZE};
 use crate::pdf::render::{pixel_box_to_pdf_points, render_page_for_detection, resize_for_model, ClipRenderBudget};
 use crate::pipeline::associate::associate_page;
 use crate::pipeline::export::{export_object, manifest_entry, write_manifest};
-use crate::pipeline::types::{Manifest, ManifestEntry, PageDetection, VerificationInfo};
+use crate::pipeline::types::{Manifest, ManifestEntry, OutputFormat, PageDetection, VerificationInfo};
 use crate::verify;
 
 /// DPI used for the full-page detection-pass render (matches the 200 DPI
@@ -45,6 +45,10 @@ pub struct ProcessPdfParams<'a> {
     pub labels: Vec<String>,
     pub score_thresh: f32,
     pub clip_budget: ClipRenderBudget,
+    /// The single image format every exported crop in this run is encoded
+    /// as (see `pipeline::types::OutputFormat` - this app used to always
+    /// export both WebP and AVIF; now the caller picks one).
+    pub output_format: OutputFormat,
     /// Off by default: when true, each detected object's crop is checked
     /// (and, if needed, corrected and re-checked) via the `codex` CLI
     /// before export - see `crate::verify`. Requires network access and
@@ -165,12 +169,13 @@ pub fn process_pdf(
                     attempts: verify_outcome.attempts,
                     passed: verify_outcome.passed,
                     last_issue: verify_outcome.last_issue,
+                    history: verify_outcome.history,
                 })
             } else {
                 None
             };
 
-            let files = export_object(&page, obj, &page_dir, *seq, params.clip_budget)
+            let files = export_object(&page, obj, &page_dir, *seq, params.clip_budget, params.output_format)
                 .with_context(|| format!("exporting object {}", obj.id))?;
 
             on_event(PipelineEvent::ObjectExported {

@@ -51,7 +51,37 @@
       </section>
 
       <section class="card">
-        <h2>3. Extract</h2>
+        <h2>3. Choose an output format</h2>
+        <div id="format-picker" class="format-picker">
+          <label class="radio-label">
+            <input type="radio" name="output-format" value="webp" checked />
+            WebP
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="output-format" value="avif" />
+            AVIF
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="output-format" value="png" />
+            PNG
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="output-format" value="jpeg" />
+            JPEG
+          </label>
+          <label class="radio-label radio-label-disabled" title="Investigated but not available: the crate specified for this (jxl-rs / libjxl/jxl-rs) is currently decode-only and has no JPEG XL encoder. See README for details.">
+            <input type="radio" name="output-format" value="jpegxl" disabled />
+            JPEG XL <span class="format-unavailable-note">(not available — see README)</span>
+          </label>
+        </div>
+        <p class="info-line">
+          Every crop is exported as exactly one format (with-caption and no-caption files, quality
+          85 for lossy formats; PNG is lossless).
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>4. Extract</h2>
         <div class="row-inline verify-row">
           <label class="checkbox-label">
             <input type="checkbox" id="verify-checkbox" />
