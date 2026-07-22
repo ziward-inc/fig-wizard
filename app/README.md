@@ -27,6 +27,73 @@ already checked out at `src-tauri/models/` and `src-tauri/binaries/pdfium/` if p
 contributors who already have those don't need to re-download anything. That fallback path
 is compiled out of release builds.
 
+## Installing via `cargo install`
+
+As an alternative to the `.dmg` release or running from source with `npm run tauri dev`,
+the app can be installed as a plain binary via Cargo (confirmed working: `cargo install
+--path app/src-tauri --locked` successfully builds and installs a `figwizard` binary):
+
+```sh
+git clone https://github.com/ziward-inc/fig-wizard.git
+cd fig-wizard
+cargo install --path app/src-tauri --locked
+```
+
+This puts a `figwizard` executable on your `$PATH` (typically `~/.cargo/bin/figwizard`),
+which launches the same GUI app when run from a terminal.
+
+**This is not the same as a proper macOS `.app`, though** - `cargo install` only produces
+a bare Mach-O executable, not an app bundle:
+- No Dock icon, no `Info.plist`, no Spotlight/Launchpad visibility as an installed app -
+  it only runs when launched from a terminal (or wrapped in your own launcher).
+- The custom app icon (`icons/icon.icns` etc.) is baked into the `.app`/`.dmg` bundle by
+  Tauri's *bundler* step (`tauri build`), which `cargo install` doesn't invoke - you get
+  Rust's default binary, no icon customization.
+- Still requires the same first-run model/PDFium download described above (unaffected by
+  the install method).
+
+Use the `.dmg` release for a normal double-click-to-install experience; use `cargo
+install` if you specifically want a CLI-launchable binary (e.g. for scripting, or to avoid
+Gatekeeper's `.app` quarantine flow entirely - see notarization below).
+
+## Notarization status
+
+The `.dmg`/`.app` published in [Releases](https://github.com/ziward-inc/fig-wizard/releases)
+is **ad-hoc signed only** - confirmed via `codesign -dv FigWizard.app`, which reports
+`flags=0x20002(adhoc,linker-signed)` and `TeamIdentifier=not set`. There is no Apple
+Developer ID signature and the app is **not notarized**. Concretely, this means:
+
+- macOS Gatekeeper will refuse to open it via a normal double-click ("cannot be opened
+  because it is from an unidentified developer" / "Apple could not verify...").
+- To run it anyway: right-click the `.app` → **Open** → confirm in the dialog (only needed
+  once), or run `xattr -cr /Applications/FigWizard.app` to strip the quarantine attribute.
+- The `cargo install` route above sidesteps this entirely, since Gatekeeper's quarantine
+  flow applies to app bundles downloaded via a browser/Finder, not to binaries built and
+  installed locally by Cargo.
+
+### What real notarization would require (not currently set up)
+
+To ship a build that opens with no warnings, you'd need:
+1. A paid **Apple Developer Program** membership (Team ID).
+2. A **Developer ID Application** signing certificate installed in the build machine's
+   keychain.
+3. Tauri's bundler configured to sign during `tauri build` - as of Tauri v2 this is
+   generally driven by environment variables at build time such as
+   `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`, and `APPLE_CERTIFICATE_PASSWORD` for
+   code signing, plus `APPLE_ID`/`APPLE_PASSWORD` (or an App Store Connect API key +
+   `APPLE_TEAM_ID`) for the actual notarization submission to Apple.
+   **These exact variable names weren't independently verified against Tauri's source in
+   this environment - check the current [Tauri v2 macOS code-signing
+   docs](https://v2.tauri.app/distribute/sign/macos/) before relying on them.**
+4. `tauri build` submits the app to Apple's notary service automatically once signing is
+   configured; add `--skip-stapling` for the very first notarization run (per `tauri build
+   --help`, initial notarization "can take multiple hours" - this flag lets the build
+   finish without blocking on it, at the cost of not stapling the ticket onto the app for
+   offline Gatekeeper checks until a later run).
+
+None of this is configured in this repo today - v0.1.0 ships ad-hoc signed, matching a
+personal/small-org distribution scope rather than a public, warning-free release.
+
 ## Using it
 
 1. Drag a PDF onto the drop zone (or click "Choose PDF…").
