@@ -150,17 +150,20 @@ impl DetectedObject {
 /// this app used to always export both WebP and AVIF (4 files/object); now
 /// the user picks one format and gets 2 files/object (with/without caption).
 ///
-/// JPEG XL is deliberately NOT a variant here: the crate the user specified
-/// for this (`jxl-rs`, i.e. `libjxl/jxl-rs` on GitHub) is, as of this
-/// writing, an explicitly decode-only, work-in-progress reimplementation of
-/// a JPEG XL decoder ("This is a work-in-progress reimplementation of a
-/// JPEG XL decoder in Rust" per its own README) with no encode module in
-/// its source tree at all, and it isn't even published on crates.io under
-/// that name. A different crate (`jpegxl-rs`, GPL-3.0-or-later bindings to
-/// the real libjxl, with a `vendored` build feature) WAS spiked separately
-/// and does encode/decode real JPEG XL files correctly - but since it's not
-/// the crate that was authorized for this feature, it isn't wired in here.
-/// See README.md's "Known limitations" section for the full writeup.
+/// JPEG XL (`OutputFormat::JpegXl`) IS shipped, but not via a linked-in Rust
+/// encoder crate: the user-specified `jxl-rs` turned out to be decode-only,
+/// and the alternative `jpegxl-rs` (real bindings to libjxl) carries a
+/// GPL-3.0-or-later license on the bindings themselves, which would make a
+/// *distributed* build of this app subject to that copyleft even though
+/// libjxl itself is BSD-3-Clause. Instead, `pipeline::export::encode_jpegxl`
+/// shells out to libjxl's own `cjxl` command-line encoder as a subprocess
+/// (the same established pattern this codebase already uses for the
+/// optional Codex crop-verification feature - see `verify::run_codex_verify`
+/// / `verify::run_with_timeout`), so no GPL-licensed code is ever linked
+/// into the binary: `cjxl` is invoked as an external process, not a
+/// dependency. This does mean JPEG XL requires `cjxl` to be installed
+/// separately (`brew install jpeg-xl`) - see `export::cjxl_available` and
+/// README.md's "JPEG XL: shipped via `cjxl` subprocess" section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
@@ -168,6 +171,7 @@ pub enum OutputFormat {
     Avif,
     Png,
     Jpeg,
+    JpegXl,
 }
 
 impl OutputFormat {
@@ -178,6 +182,7 @@ impl OutputFormat {
             OutputFormat::Avif => "avif",
             OutputFormat::Png => "png",
             OutputFormat::Jpeg => "jpg",
+            OutputFormat::JpegXl => "jxl",
         }
     }
 
@@ -189,6 +194,7 @@ impl OutputFormat {
             OutputFormat::Avif => "avif",
             OutputFormat::Png => "png",
             OutputFormat::Jpeg => "jpeg",
+            OutputFormat::JpegXl => "jpegxl",
         }
     }
 

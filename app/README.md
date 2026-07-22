@@ -2,8 +2,8 @@
 
 A macOS-only Tauri app that extracts figures, tables, formulas, and algorithm/pseudocode
 blocks from academic paper PDFs, exporting each as a near-4K crop in **one** user-selected
-image format (WebP, AVIF, PNG, or JPEG - quality 85 for the lossy ones), with and without
-an associated caption.
+image format (WebP, AVIF, PNG, JPEG, or JPEG XL - quality 85 for the lossy ones), with and
+without an associated caption.
 
 ## Running it
 
@@ -32,16 +32,18 @@ is compiled out of release builds.
 1. Drag a PDF onto the drop zone (or click "Choose PDF…").
 2. Pick an output folder (defaults to an `extracted/` folder next to the PDF; override with
    "Choose output folder…").
-3. Choose an output format: **WebP, AVIF, PNG, or JPEG** (radio buttons - exactly one is
-   active per run). **WebP is the default.** JPEG XL is listed but permanently greyed
-   out/disabled - see "JPEG XL: investigated, not shipped" below for why.
+3. Choose an output format: **WebP, AVIF, PNG, JPEG, or JPEG XL** (radio buttons - exactly
+   one is active per run). **WebP is the default.** JPEG XL requires the `cjxl` CLI
+   (`brew install jpeg-xl`) to be installed locally - its radio is greyed out until the app
+   confirms `cjxl` is available, and re-checks automatically at startup. See "JPEG XL:
+   shipped via a `cjxl` subprocess" below for how this works and why.
 4. Click "Extract" and watch the live per-page progress and running counts by kind.
 5. When done, browse the results gallery (grouped by page, click a thumbnail for the full
    crop plus both output file paths and a "Reveal in Finder" action).
 
 Extraction writes to
 `<output_dir>/<pdf-stem>/page-NNNN/<kind>-NN_{with,no}-caption_q85.<ext>` for the lossy
-formats (`webp`/`avif`/`jpg`) or `<kind>-NN_{with,no}-caption.png` (no quality suffix,
+formats (`webp`/`avif`/`jpg`/`jxl`) or `<kind>-NN_{with,no}-caption.png` (no quality suffix,
 since PNG is lossless) for PNG, plus a `manifest.json` describing every exported object
 (kind, page, bbox, score, caption association, file paths).
 
@@ -56,13 +58,14 @@ different format selected will (over)write a fresh set of files (and a fresh
 **Gallery preview limitation:** the results gallery's thumbnails and modal preview try to
 render every format inline via an `<img>` tag. In practice, PNG/JPEG/WebP display reliably
 in Tauri's WKWebView on macOS 15+; **AVIF's inline support has been inconsistent across
-WebKit/Safari versions** and isn't something this app can guarantee ahead of time. Rather
-than hardcode per-format support (which would silently go stale as WebKit changes), the
-gallery detects a real image-load failure per-file and falls back to a generic file-icon +
-filename placeholder for that thumbnail/preview - "Reveal in Finder" still works
-regardless. If you pick AVIF and see placeholder icons instead of thumbnails, that's this
-fallback kicking in, not a bug in the export itself (the files are still valid AVIF - see
-the manifest and try opening one directly).
+WebKit/Safari versions**, and **JPEG XL has no inline `<img>` support in WebKit at all** as
+of this writing - neither is something this app can guarantee/work around ahead of time.
+Rather than hardcode per-format support (which would silently go stale as WebKit changes),
+the gallery detects a real image-load failure per-file and falls back to a generic
+file-icon + filename placeholder for that thumbnail/preview - "Reveal in Finder" still
+works regardless. If you pick AVIF or JPEG XL and see placeholder icons instead of
+thumbnails, that's this fallback kicking in, not a bug in the export itself (the files are
+still valid AVIF/JPEG XL - see the manifest and try opening one directly, or via `djxl`).
 
 ### `manifest.json` schema change: `files` shape
 
@@ -81,44 +84,56 @@ It is now:
 "files": { "format": "webp", "with_caption": "...", "no_caption": "..." }
 ```
 
-`format` is one of `"webp"`, `"avif"`, `"png"`, `"jpeg"` (lowercase, matching the radio
-button values). Old manifests from before this change will fail to parse against the new
+`format` is one of `"webp"`, `"avif"`, `"png"`, `"jpeg"`, `"jpegxl"` (lowercase, matching
+the radio button values - note `"jpegxl"` has no separator, while its file extension is
+`.jxl`, mirroring how `"jpeg"` already maps to a `.jpg` extension). Old manifests from
+before this change will fail to parse against the new
 `ExportedFiles` struct - this is intentional (no dual-schema fallback was added, to avoid
 silently reading stale data as if it were current); re-run extraction to get a manifest in
 the new shape.
 
-### JPEG XL: investigated, not shipped
+### JPEG XL: shipped via a `cjxl` subprocess
 
-JPEG XL was evaluated as a 5th output format. The specific crate required for this
-investigation, **`jxl-rs`** (`libjxl/jxl-rs` on GitHub - a from-scratch pure-Rust
-reimplementation maintained by the JPEG XL/libjxl team), is, as of this writing, an
-**explicitly decode-only, work-in-progress JPEG XL decoder**: its own README states "This
-is a work-in-progress reimplementation of a JPEG XL **decoder** in Rust," its `jxl` crate
-has no `encode` module anywhere in its source tree (only `frame`/`headers`/`render`/
-`entropy_coding`/`color`/etc - all decode-pipeline stages), and it isn't published on
-crates.io under that name at all (would require a git dependency). There is no encoding
-capability to wire up.
+JPEG XL was initially evaluated as a 5th output format via two Rust crates, and neither
+was wired in. The user-specified crate, **`jxl-rs`** (`libjxl/jxl-rs` on GitHub - a
+from-scratch pure-Rust reimplementation maintained by the JPEG XL/libjxl team), turned out
+to be an **explicitly decode-only, work-in-progress JPEG XL decoder**: its own README
+states "This is a work-in-progress reimplementation of a JPEG XL **decoder** in Rust," its
+`jxl` crate has no `encode` module anywhere in its source tree (only `frame`/`headers`/
+`render`/`entropy_coding`/`color`/etc - all decode-pipeline stages), and it isn't published
+on crates.io under that name at all. The alternative, **`jpegxl-rs`** (safe Rust bindings
+to the real, reference `libjxl`), does encode real JPEG XL files correctly, but is licensed
+**GPL-3.0-or-later** on the bindings themselves - even though libjxl the underlying C
+library is BSD-3-Clause, linking those bindings into a *distributed* build of this app
+would make it subject to GPL-3.0 copyleft. Neither crate was an acceptable path.
 
-Separately, as a spike, the crate **`jpegxl-rs`** (safe Rust bindings to the real,
-reference `libjxl`, with a `vendored` Cargo feature that builds `libjxl` from source so
-end users don't need `brew install jpeg-xl`) was tried and **does work**: it successfully
-built libjxl from source in this environment, encoded a real crop
-(`tests/output/ppo_algorithm_crop.png`) to a valid `.jxl` file (verified via magic bytes
-`FF 0A`, macOS `sips`/`file` recognizing it as "JPEG XL codestream", a full decode
-round-trip confirming matching dimensions, and a visual check converting it back to PNG),
-using `.jpeg_quality(85.0)` (the crate's own JPEG-style-quality-to-butteraugli-distance
-conversion, for direct comparability with the quality=85 used everywhere else). However,
-`jpegxl-rs` is **not** the crate specified for this feature, and it is licensed
-**GPL-3.0-or-later** (vendoring/linking it would make a *distributed* build of this app
-subject to GPL-3.0 copyleft - libjxl itself is BSD-3, but these particular Rust bindings
-are GPL). Substituting it without authorization would also be a scope violation, not just
-a licensing question. So: JPEG XL ships in **none** of the 5 originally-considered formats;
-the app ships WebP/AVIF/PNG/JPEG. The picker still lists "JPEG XL" so this decision is
-visible in the UI, permanently disabled with a tooltip explaining why (see `index.html`'s
-`#format-picker`).
+The approach that **is** shipped instead: `pipeline::export::encode_jpegxl` shells out to
+libjxl's own `cjxl` command-line encoder as an external subprocess - exactly the same
+pattern this codebase already uses for the optional Codex crop-verification feature (see
+`verify::run_codex_verify`/`verify::run_with_timeout`, whose subprocess/timeout-handling
+machinery `encode_jpegxl` directly reuses via `verify::run_with_timeout`). Because `cjxl`
+runs as a separate process rather than being linked into the app binary, no GPL-licensed
+code ever ends up in a distributed build - only the BSD-3-Clause `libjxl` C library itself
+is invoked, as a tool, not a dependency.
 
-If JPEG XL is wanted later: either wait for `jxl-rs` to grow encode support upstream, or
-make an explicit, informed call to take on the `jpegxl-rs` GPL-3.0 dependency instead.
+Concretely, `encode_jpegxl` writes the crop to a temp PNG (via the `image` crate, already a
+dependency), then runs `cjxl <temp.png> <temp.jxl> -q 85` (the same quality=85 used for
+every other lossy format, on `cjxl`'s own "roughly matches libjpeg quality" 0-100 scale),
+reads back the resulting `.jxl` codestream, and cleans up both temp files afterward
+regardless of success/failure. This was verified end-to-end on this machine: `cjxl`
+produces a file with the real JPEG XL codestream magic bytes (`FF 0A`), `file`/`sips`
+recognize it as "JPEG XL codestream", and `djxl output.jxl decoded.png` round-trips it back
+to a PNG with matching pixel dimensions.
+
+**Prerequisite: `cjxl` must be installed locally** (`brew install jpeg-xl` on macOS) -
+unlike the other 4 formats, which are fully self-contained via linked-in Rust crates, this
+one depends on an external binary being on `PATH`. The app checks for it automatically at
+startup (`cjxl_status`/`cjxl --version`, mirroring `codex_status`'s pattern exactly) and
+keeps the "JPEG XL" radio disabled with an explanatory tooltip until `cjxl` is found; it
+also re-checks as a hard preflight (failing fast with a clear error) if `run_extraction` is
+somehow called with `jpegxl` selected while `cjxl` isn't available. `tests/export_formats.rs`
+exercises the same `cjxl_available()` check to skip its JPEG XL case gracefully (rather than
+hard-failing the suite) on a machine without libjxl installed.
 
 ## Optional: verify crops with Codex (off by default)
 
@@ -178,8 +193,9 @@ etc.) so you can see exactly why each retry happened, not just how many there we
 ## Known limitations / gaps (read before filing a bug)
 
 - **Extraction is slow.** This is a CPU-bound pipeline: ONNX layout detection per page plus
-  near-4K image encoding per object (AVIF is the slowest of the 4 shipped formats to
-  encode; PNG/JPEG/WebP are faster), no GPU acceleration. A 15-page paper with ~17
+  near-4K image encoding per object (AVIF is the slowest of the 5 shipped formats to
+  encode; PNG/JPEG/WebP are faster; JPEG XL's `cjxl` subprocess adds its own process-spawn
+  overhead on top of encode time), no GPU acceleration. A 15-page paper with ~17
   extracted objects takes on the order of ten-plus minutes on a laptop CPU with AVIF
   selected. The UI treats this as a real background job (live progress events,
   cancellable) rather than pretending it's fast — expect multi-minute runs on longer

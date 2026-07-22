@@ -24,6 +24,9 @@ const outputDirLabel = document.querySelector("#output-dir-label");
 
 const formatPicker = document.querySelector("#format-picker");
 const formatRadios = formatPicker.querySelectorAll('input[name="output-format"]');
+const jpegxlRadio = formatPicker.querySelector('input[name="output-format"][value="jpegxl"]');
+const jpegxlRadioLabel = document.querySelector("#jpegxl-radio-label");
+const jpegxlUnavailableNote = document.querySelector("#jpegxl-unavailable-note");
 
 const verifyCheckbox = document.querySelector("#verify-checkbox");
 const verifyHint = document.querySelector("#verify-hint");
@@ -56,6 +59,7 @@ let modelStatus = null;
 let currentJobId = null;
 let cumulativeCounts = {};
 let codexAvailable = null; // null = unknown/not checked yet, else bool
+let cjxlAvailable = null; // null = unknown/not checked yet, else bool - gates the JPEG XL radio
 
 // ---- Small helpers ------------------------------------------------------
 
@@ -124,6 +128,31 @@ downloadModelBtn.addEventListener("click", async () => {
     downloadModelBtn.disabled = false;
   }
 });
+
+// ---- JPEG XL availability (cjxl subprocess preflight) ------------------
+
+// Unlike Codex verification (an opt-in checkbox the user explicitly
+// toggles), JPEG XL is one of the format radios shown up front, so this
+// check runs once at boot rather than on a user interaction - the radio
+// should already reflect availability by the time the user looks at step 3.
+async function refreshCjxlStatus() {
+  try {
+    const status = await invoke("cjxl_status");
+    cjxlAvailable = status.available;
+    if (status.available) {
+      jpegxlRadioLabel.title = `cjxl CLI found (${status.detail}).`;
+      jpegxlUnavailableNote.textContent = "";
+    } else {
+      jpegxlRadioLabel.title = `cjxl CLI not available: ${status.detail}. Install libjxl with \`brew install jpeg-xl\` to enable this format.`;
+      jpegxlUnavailableNote.textContent = "(requires `brew install jpeg-xl` — see README)";
+    }
+  } catch (e) {
+    cjxlAvailable = false;
+    jpegxlRadioLabel.title = `Could not check cjxl CLI status: ${e}`;
+    jpegxlUnavailableNote.textContent = "(requires `brew install jpeg-xl` — see README)";
+  }
+  updateExtractButtonState();
+}
 
 const STAGE_LABELS = { config: "Downloading config…", model: "Downloading detection model…", pdfium: "Downloading PDFium…" };
 
@@ -243,11 +272,19 @@ function updateExtractButtonState() {
 
   // The selected format only takes effect at the start of a run - lock it
   // while one is in flight so it can't be changed mid-extraction. The
-  // "jpegxl" radio stays permanently disabled regardless (see index.html) -
-  // it's not wired to a working encoder, see README.
+  // "jpegxl" radio is additionally gated on the `cjxl` CLI preflight check
+  // (see `refreshCjxlStatus`) - it stays disabled (and, if currently
+  // selected, gets deselected back to the default) whenever `cjxl` isn't
+  // available, regardless of busy state.
   for (const radio of formatRadios) {
     if (radio.value === "jpegxl") continue;
     radio.disabled = busy;
+  }
+  jpegxlRadio.disabled = busy || cjxlAvailable !== true;
+  jpegxlRadioLabel.classList.toggle("radio-label-disabled", jpegxlRadio.disabled);
+  if (jpegxlRadio.disabled && jpegxlRadio.checked) {
+    jpegxlRadio.checked = false;
+    formatPicker.querySelector('input[name="output-format"][value="webp"]').checked = true;
   }
 }
 
@@ -388,7 +425,7 @@ function renderGallery(manifest) {
 
 // Display name for the lowercase format strings in `manifest.json`'s
 // `files.format` (see `OutputFormat::as_str` on the Rust side).
-const FORMAT_LABELS = { webp: "WebP", avif: "AVIF", png: "PNG", jpeg: "JPEG" };
+const FORMAT_LABELS = { webp: "WebP", avif: "AVIF", png: "PNG", jpeg: "JPEG", jpegxl: "JPEG XL" };
 function formatLabel(format) {
   return FORMAT_LABELS[format] || format;
 }
@@ -573,4 +610,5 @@ objectModal.querySelector(".modal-backdrop").addEventListener("click", () => set
 
 window.addEventListener("DOMContentLoaded", () => {
   refreshModelStatus();
+  refreshCjxlStatus();
 });

@@ -6,10 +6,19 @@
 //! this doesn't just check the code compiles, it confirms each encoder
 //! produces a file a real decoder would recognize. Uses `ppo_mini.pdf`
 //! (2 pages) rather than the 12-page `ppo.pdf`/`attention.pdf` so running
-//! this 4x (once per format) stays fast.
+//! this once per format stays fast.
+//!
+//! `OutputFormat::JpegXl` is exercised too, but only if the `cjxl` CLI
+//! (libjxl, `brew install jpeg-xl`) is actually available on this machine -
+//! unlike the other 4 formats, which are fully self-contained via linked-in
+//! Rust crates, JPEG XL shells out to an external system binary (see
+//! `pipeline::export::encode_jpegxl` / `cjxl_available`). Rather than hard
+//! failing the whole suite on a machine without libjxl installed, that case
+//! is skipped with a clear printed message.
 
 use app_lib::detect::DEFAULT_SCORE_THRESH;
 use app_lib::pdf::render::{init_pdfium, ClipRenderBudget};
+use app_lib::pipeline::export::cjxl_available;
 use app_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
 use app_lib::pipeline::types::OutputFormat;
 use pdfium_render::prelude::Pdfium;
@@ -59,12 +68,25 @@ fn assert_valid_magic_bytes(format: OutputFormat, data: &[u8]) {
                 &data[..data.len().min(16)]
             );
         }
+        OutputFormat::JpegXl => {
+            // Raw JPEG XL codestream magic bytes - confirmed manually on
+            // this machine: `cjxl input.png output.jxl -q 85` produces a
+            // file starting with `FF 0A` (not the ISOBMFF `.jxl` container
+            // form, which starts with a box header instead - `cjxl`'s
+            // default output is the bare codestream).
+            assert!(
+                data.starts_with(&[0xFF, 0x0A]),
+                "not a valid JPEG XL codestream signature: {:?}",
+                &data[..data.len().min(16)]
+            );
+        }
     }
 
     // Cross-check with the `image` crate's own format sniffing where it
     // supports the format (avif support in `image` varies by version/
-    // features, so that one is magic-bytes-only above).
-    if !matches!(format, OutputFormat::Avif) {
+    // features, and this `image` crate has no JPEG XL decoder at all, so
+    // those two are magic-bytes-only above).
+    if !matches!(format, OutputFormat::Avif | OutputFormat::JpegXl) {
         image::load_from_memory(data).unwrap_or_else(|e| {
             panic!("`image` crate could not decode this {format:?} output: {e}")
         });
@@ -72,11 +94,12 @@ fn assert_valid_magic_bytes(format: OutputFormat, data: &[u8]) {
 }
 
 /// `Pdfium::bind_to_library` can only succeed once per process (see
-/// `commands.rs`'s own doc comment on `AppState::pdfium`), so all 4 formats
-/// are exercised against ONE shared `Pdfium` instance within a single
-/// `#[test]` function rather than 4 separate test functions (which `cargo
-/// test` would otherwise run as 4 threads in the same process and hit
-/// `PdfiumLibraryBindingsAlreadyInitialized` on the 2nd-4th).
+/// `commands.rs`'s own doc comment on `AppState::pdfium`), so every format
+/// is exercised against ONE shared `Pdfium` instance within a single
+/// `#[test]` function rather than one separate test function per format
+/// (which `cargo test` would otherwise run as parallel threads in the same
+/// process and hit `PdfiumLibraryBindingsAlreadyInitialized` on all but the
+/// first).
 fn run_for_format(pdfium: &Pdfium, root: &PathBuf, model_path: &PathBuf, labels: Vec<String>, format: OutputFormat) {
     let pdf_path = root.join("phase0-spike/pdfs/ppo_mini.pdf");
     let output_dir = root
@@ -151,5 +174,21 @@ fn export_all_formats_produce_valid_files() {
 
     for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Png, OutputFormat::Jpeg] {
         run_for_format(&pdfium, &root, &model_path, labels.clone(), format);
+    }
+
+    // JPEG XL depends on an external system binary (`cjxl`, not a linked-in
+    // crate like the other 4 formats) - skip gracefully rather than failing
+    // the whole suite on a machine that doesn't have libjxl installed.
+    match cjxl_available() {
+        Ok(version) => {
+            println!("cjxl available ({version}) - running JpegXl case");
+            run_for_format(&pdfium, &root, &model_path, labels.clone(), OutputFormat::JpegXl);
+        }
+        Err(e) => {
+            println!(
+                "SKIP: OutputFormat::JpegXl case - `cjxl` not available ({e}). \
+Install via `brew install jpeg-xl` to include this case."
+            );
+        }
     }
 }

@@ -411,7 +411,11 @@ fn run_codex_verify(
 /// result is read from the `-o` file instead, and the chatty transcript can
 /// be large), but the quick `codex --version` preflight check does, to
 /// surface the version string to the UI.
-fn run_with_timeout(
+///
+/// `pub(crate)` (rather than private) so `pipeline::export`'s `cjxl`
+/// subprocess calls (JPEG XL encoding + its availability preflight) can
+/// reuse the same timeout/kill/drain machinery instead of duplicating it.
+pub(crate) fn run_with_timeout(
     mut cmd: Command,
     timeout: Duration,
     capture_stdout: bool,
@@ -450,7 +454,11 @@ fn run_with_timeout(
                     let _ = child.wait();
                     let _ = stdout_handle.join();
                     let _ = stderr_handle.join();
-                    return Err(format!("codex exec timed out after {}s", timeout.as_secs()));
+                    // Generic message: this helper is shared by both the
+                    // `codex` calls in this module and `pipeline::export`'s
+                    // `cjxl` calls (see the `pub(crate)` doc comment above),
+                    // so it can't hardcode either binary's name.
+                    return Err(format!("process timed out after {}s", timeout.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }

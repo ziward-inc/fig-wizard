@@ -69,14 +69,15 @@
             <input type="radio" name="output-format" value="jpeg" />
             JPEG
           </label>
-          <label class="radio-label radio-label-disabled" title="Investigated but not available: the crate specified for this (jxl-rs / libjxl/jxl-rs) is currently decode-only and has no JPEG XL encoder. See README for details.">
+          <label id="jpegxl-radio-label" class="radio-label radio-label-disabled" title="Checking for the cjxl CLI…">
             <input type="radio" name="output-format" value="jpegxl" disabled />
-            JPEG XL <span class="format-unavailable-note">(not available — see README)</span>
+            JPEG XL <span id="jpegxl-unavailable-note" class="format-unavailable-note">(checking…)</span>
           </label>
         </div>
         <p class="info-line">
           Every crop is exported as exactly one format (with-caption and no-caption files, quality
-          85 for lossy formats; PNG is lossless).
+          85 for lossy formats; PNG is lossless). JPEG XL is encoded via a local <code>cjxl</code>
+          subprocess (libjxl) rather than a bundled encoder - see README.
         </p>
       </section>
 

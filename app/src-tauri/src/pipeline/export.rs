@@ -8,17 +8,27 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder, RgbImage};
 use pdfium_render::prelude::PdfPage;
+use std::process::Command;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::pdf::render::{render_clip, ClipRenderBudget};
 use crate::pipeline::types::{
     DetectedObject, ExportedFiles, Manifest, ManifestEntry, OutputFormat, VerificationInfo,
 };
+use crate::verify::run_with_timeout;
 
 /// JPEG-style quality (0-100) applied to every lossy format. PNG is
 /// lossless and ignores this.
 const QUALITY: u8 = 85;
+
+/// Wall-clock cap on a single `cjxl` invocation. `cjxl` on a near-4K crop
+/// completes in well under a second in manual testing, so this leaves
+/// generous headroom without letting a hung/stalled subprocess block the
+/// pipeline indefinitely (mirrors `verify::CODEX_TIMEOUT_SECS`'s role for
+/// the other subprocess this app shells out to).
+const CJXL_TIMEOUT_SECS: u64 = 60;
 
 /// WebP encode at a fixed quality. Uses the `webp` crate (libwebp
 /// bindings), NOT `image`'s built-in WebP encoder, which only supports
@@ -66,6 +76,73 @@ fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// JPEG XL encode at a fixed quality by shelling out to libjxl's `cjxl`
+/// command-line encoder (see `pipeline::types::OutputFormat`'s doc comment
+/// for why this is a subprocess rather than a linked-in crate). Writes
+/// `img` to a temp PNG, invokes `cjxl <temp.png> <temp.jxl> -q QUALITY`,
+/// reads back the resulting codestream, and cleans up both temp files
+/// afterward regardless of success/failure.
+///
+/// Mirrors `verify::run_codex_verify`'s subprocess-handling style: a
+/// dedicated temp working area, a hard timeout via `run_with_timeout` so a
+/// hung `cjxl` can't block the pipeline forever, and stderr captured for a
+/// clear error message on failure.
+fn encode_jpegxl(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
+    let work_dir = std::env::temp_dir().join(format!("pdf-extractor-jxl-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&work_dir)
+        .with_context(|| format!("creating jxl temp work dir {work_dir:?}"))?;
+
+    // Always clean up the temp dir on the way out, success or failure.
+    let result = (|| -> Result<Vec<u8>> {
+        let png_path = work_dir.join("input.png");
+        let jxl_path = work_dir.join("output.jxl");
+
+        fs::write(&png_path, encode_png(img)?)
+            .with_context(|| format!("writing jxl temp input {png_path:?}"))?;
+
+        let mut cmd = Command::new("cjxl");
+        cmd.arg(&png_path).arg(&jxl_path).arg("-q").arg(quality.to_string());
+
+        let output = run_with_timeout(cmd, Duration::from_secs(CJXL_TIMEOUT_SECS), false).map_err(|e| {
+            anyhow!("running cjxl: {e}. Is libjxl installed? (`brew install jpeg-xl`)")
+        })?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "cjxl exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+
+        fs::read(&jxl_path).with_context(|| format!("reading cjxl output {jxl_path:?}"))
+    })();
+
+    let _ = fs::remove_dir_all(&work_dir);
+    result
+}
+
+/// Quick check for whether the `cjxl` binary is callable at all (on `PATH`,
+/// executes without erroring). Mirrors `verify::codex_available`'s
+/// style/pattern exactly, so the app can preflight-check this before
+/// starting an extraction run with JPEG XL selected, the same way Codex
+/// availability is checked upfront for the verification feature.
+pub fn cjxl_available() -> Result<String, String> {
+    let mut cmd = Command::new("cjxl");
+    cmd.arg("--version");
+    match run_with_timeout(cmd, Duration::from_secs(10), true) {
+        Ok(output) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        }
+        Ok(output) => Err(format!(
+            "cjxl --version exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(e) => Err(format!("cjxl binary not runnable: {e}. Install via `brew install jpeg-xl`.")),
+    }
+}
+
 /// Encodes `img` in the requested `format` at the app-wide fixed quality
 /// (`QUALITY` for lossy formats; ignored for PNG).
 fn encode(img: &RgbImage, format: OutputFormat) -> Result<Vec<u8>> {
@@ -74,6 +151,7 @@ fn encode(img: &RgbImage, format: OutputFormat) -> Result<Vec<u8>> {
         OutputFormat::Avif => encode_avif(img, QUALITY as f32),
         OutputFormat::Png => encode_png(img),
         OutputFormat::Jpeg => encode_jpeg(img, QUALITY),
+        OutputFormat::JpegXl => encode_jpegxl(img, QUALITY),
     }
 }
 
