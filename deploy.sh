@@ -53,12 +53,6 @@ MOUNT="$(mktemp -d /tmp/figwizard-release-XXXXXX)"
 hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG"
 BUNDLE_VERSION="$(plutil -extract CFBundleShortVersionString raw "$MOUNT/FigWizard.app/Contents/Info.plist")"
 file "$MOUNT/FigWizard.app/Contents/MacOS/figwizard"
-PDFIUM_LIB="$MOUNT/FigWizard.app/Contents/Frameworks/libpdfium.dylib"
-if [[ ! -f "$PDFIUM_LIB" ]]; then
-  echo "Bundled PDFium library is missing: $PDFIUM_LIB" >&2
-  exit 1
-fi
-file "$PDFIUM_LIB"
 codesign -dv --verbose=4 "$MOUNT/FigWizard.app"
 hdiutil detach "$MOUNT"
 rmdir "$MOUNT"
