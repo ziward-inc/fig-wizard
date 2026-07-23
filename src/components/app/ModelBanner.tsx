@@ -10,7 +10,6 @@ import type {
 const STAGE_LABELS: Record<string, string> = {
   config: "Downloading config…",
   model: "Downloading detection model…",
-  pdfium: "Downloading PDFium…",
 }
 
 export type DownloadState = "idle" | "downloading" | "error"

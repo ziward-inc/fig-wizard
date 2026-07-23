@@ -3,13 +3,9 @@
 //! `#[tauri::command]`s the frontend can call.
 //!
 //! Asset resolution strategy (see `resolve_pdfium_dir` / `resolve_model_and_labels`):
-//! production always looks in the Tauri app-data-dir (populated by
-//! `download_model`); if running a debug build (`cargo tauri dev`) and the
-//! app-data-dir copy isn't there yet, we fall back to the gitignored local
-//! dev assets under `src-tauri/models` / `src-tauri/binaries/pdfium` for
-//! developer convenience. That dev fallback is compiled out of release
-//! builds (`cfg!(debug_assertions)`), so a packaged app never depends on
-//! paths that only exist on the build machine.
+//! production loads PDFium from the signed app bundle and the detection model
+//! from the Tauri app-data-dir (populated by `download_model`). Debug builds
+//! can fall back to gitignored local development assets.
 
 use pdfium_render::prelude::Pdfium;
 use serde::Serialize;
@@ -31,8 +27,6 @@ const MODEL_URL: &str =
     "https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx";
 const MODEL_CONFIG_URL: &str =
     "https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX/resolve/main/config.json";
-const PDFIUM_URL: &str =
-    "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7961/pdfium-mac-arm64.tgz";
 const PDFIUM_DYLIB_NAME: &str = "libpdfium.dylib";
 const MODEL_FILE_NAME: &str = "PP-DocLayoutV3.onnx";
 const MODEL_CONFIG_FILE_NAME: &str = "config.json";
@@ -66,7 +60,7 @@ fn take_pdfium(app: &AppHandle, state: &AppState) -> Result<Pdfium, String> {
     }
     drop(guard);
     let dir = resolve_pdfium_dir(app)?;
-    init_pdfium(&dir).map_err(|e| format!("Failed to init PDFium: {e}"))
+    init_pdfium(&dir).map_err(|e| format!("Failed to init PDFium: {e:#}"))
 }
 
 fn return_pdfium(state: &AppState, pdfium: Pdfium) {
@@ -111,11 +105,11 @@ fn app_data_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .join("models"))
 }
 
-fn app_data_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn bundled_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
-        .app_data_dir()
-        .map_err(|e| format!("resolving app data dir: {e}"))?
+        .resource_dir()
+        .map_err(|e| format!("resolving app resource directory: {e}"))?
         .join("pdfium")
         .join("lib"))
 }
@@ -143,9 +137,10 @@ fn pdfium_ready(dir: &Path) -> bool {
 }
 
 fn resolve_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let prod = app_data_pdfium_dir(app)?;
-    if pdfium_ready(&prod) {
-        return Ok(prod);
+    if let Ok(bundled) = bundled_pdfium_dir(app) {
+        if pdfium_ready(&bundled) {
+            return Ok(bundled);
+        }
     }
     if cfg!(debug_assertions) {
         let dev = dev_pdfium_dir();
@@ -153,7 +148,7 @@ fn resolve_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
             return Ok(dev);
         }
     }
-    Err("PDFium library not found. Use the \"Download model\" button first.".to_string())
+    Err("PDFium library not found in the app bundle. Reinstall FigWizard.".to_string())
 }
 
 fn resolve_model_and_labels(app: &AppHandle) -> Result<(PathBuf, Vec<String>), String> {
@@ -236,11 +231,12 @@ pub async fn pick_output_dir(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
     let prod_models = app_data_models_dir(&app)?;
-    let prod_pdfium = app_data_pdfium_dir(&app)?;
     let prod_model_ok = model_ready(&prod_models);
-    let prod_pdfium_ok = pdfium_ready(&prod_pdfium);
+    let bundled_pdfium_ok = bundled_pdfium_dir(&app)
+        .map(|dir| pdfium_ready(&dir))
+        .unwrap_or(false);
 
-    if prod_model_ok && prod_pdfium_ok {
+    if prod_model_ok && bundled_pdfium_ok {
         return Ok(ModelStatus {
             model_present: true,
             pdfium_present: true,
@@ -253,14 +249,14 @@ pub fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
         let dev_pdfium_ok = pdfium_ready(&dev_pdfium_dir());
         return Ok(ModelStatus {
             model_present: prod_model_ok || dev_model_ok,
-            pdfium_present: prod_pdfium_ok || dev_pdfium_ok,
-            using_dev_assets: (!prod_model_ok && dev_model_ok) || (!prod_pdfium_ok && dev_pdfium_ok),
+            pdfium_present: bundled_pdfium_ok || dev_pdfium_ok,
+            using_dev_assets: (!prod_model_ok && dev_model_ok) || (!bundled_pdfium_ok && dev_pdfium_ok),
         });
     }
 
     Ok(ModelStatus {
         model_present: prod_model_ok,
-        pdfium_present: prod_pdfium_ok,
+        pdfium_present: bundled_pdfium_ok,
         using_dev_assets: false,
     })
 }
@@ -420,25 +416,14 @@ pub fn open_result_dir(app: AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to open {path}: {e}"))
 }
 
-/// Downloads the ONNX model + its config, and the macOS arm64 PDFium dylib
-/// (extracted from its `.tgz` release asset), into the app-data-dir so a
-/// packaged production build doesn't need ~130MB+ of weights bundled in.
-/// Emits `model-download-progress` events (`{ stage, downloaded, total }`)
-/// as each file streams in. No checksum verification yet - TODO for a
-/// future pass, not critical for personal-use v1.
+/// Downloads the ONNX model + its config into the app-data-dir. PDFium ships
+/// inside the signed app bundle. Emits `model-download-progress` events
+/// (`{ stage, downloaded, total }`) as each file streams in.
 #[tauri::command]
 pub async fn download_model(app: AppHandle) -> Result<(), String> {
     let models_dir = app_data_models_dir(&app)?;
-    let pdfium_root_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("pdfium");
-
     std::fs::create_dir_all(&models_dir)
         .map_err(|e| format!("creating {models_dir:?}: {e}"))?;
-    std::fs::create_dir_all(&pdfium_root_dir)
-        .map_err(|e| format!("creating {pdfium_root_dir:?}: {e}"))?;
 
     let client = reqwest::Client::builder()
         .build()
@@ -461,18 +446,6 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
         "model",
     )
     .await?;
-
-    let tgz_path = pdfium_root_dir.join("pdfium-mac-arm64.tgz");
-    download_file_with_progress(&app, &client, PDFIUM_URL, &tgz_path, "pdfium").await?;
-
-    let extract_dir = pdfium_root_dir.clone();
-    let extract_tgz = tgz_path.clone();
-    tokio::task::spawn_blocking(move || extract_pdfium_dylib(&extract_tgz, &extract_dir))
-        .await
-        .map_err(|e| format!("extraction task panicked: {e}"))?
-        .map_err(|e| format!("extracting PDFium archive: {e}"))?;
-
-    let _ = std::fs::remove_file(&tgz_path);
 
     Ok(())
 }
@@ -531,28 +504,4 @@ async fn download_file_with_progress(
     file.flush().await.map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-/// Extracts just `lib/libpdfium.dylib` out of a `pdfium-mac-arm64.tgz`
-/// release asset into `<dest_root>/lib/libpdfium.dylib`.
-fn extract_pdfium_dylib(tgz_path: &Path, dest_root: &Path) -> std::io::Result<()> {
-    let file = std::fs::File::open(tgz_path)?;
-    let gz = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(gz);
-
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.into_owned();
-        if path == Path::new("lib/libpdfium.dylib") {
-            let dest_lib_dir = dest_root.join("lib");
-            std::fs::create_dir_all(&dest_lib_dir)?;
-            entry.unpack(dest_lib_dir.join(PDFIUM_DYLIB_NAME))?;
-            return Ok(());
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "lib/libpdfium.dylib not found inside pdfium-mac-arm64.tgz",
-    ))
 }
