@@ -31,6 +31,20 @@ impl BBoxPt {
         (self.y0 + self.y1) / 2.0
     }
 
+    /// Expands every side by `ratio` of its corresponding dimension, without
+    /// allowing the box to exceed the page bounds.
+    pub fn expanded_by_ratio(&self, ratio: f32, page_width_pt: f32, page_height_pt: f32) -> BBoxPt {
+        let horizontal_margin = self.width() * ratio;
+        let vertical_margin = self.height() * ratio;
+
+        BBoxPt {
+            x0: (self.x0 - horizontal_margin).max(0.0),
+            y0: (self.y0 - vertical_margin).max(0.0),
+            x1: (self.x1 + horizontal_margin).min(page_width_pt),
+            y1: (self.y1 + vertical_margin).min(page_height_pt),
+        }
+    }
+
     /// Union (bounding box) of two boxes.
     pub fn union(&self, other: &BBoxPt) -> BBoxPt {
         BBoxPt {
@@ -142,6 +156,51 @@ impl DetectedObject {
             Some(cap) => self.bbox_pt.union(&cap),
             None => self.bbox_pt,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BBoxPt;
+
+    #[test]
+    fn expanded_by_ratio_adds_margin_to_every_side() {
+        let bbox = BBoxPt {
+            x0: 100.0,
+            y0: 200.0,
+            x1: 300.0,
+            y1: 500.0,
+        };
+
+        assert_eq!(
+            bbox.expanded_by_ratio(0.02, 612.0, 792.0),
+            BBoxPt {
+                x0: 96.0,
+                y0: 194.0,
+                x1: 304.0,
+                y1: 506.0,
+            }
+        );
+    }
+
+    #[test]
+    fn expanded_by_ratio_clamps_to_page_bounds() {
+        let bbox = BBoxPt {
+            x0: 5.0,
+            y0: 5.0,
+            x1: 605.0,
+            y1: 787.0,
+        };
+
+        assert_eq!(
+            bbox.expanded_by_ratio(0.02, 612.0, 792.0),
+            BBoxPt {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 612.0,
+                y1: 792.0,
+            }
+        );
     }
 }
 

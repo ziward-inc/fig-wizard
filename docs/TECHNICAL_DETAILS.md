@@ -9,6 +9,8 @@ field looks like:
 "files": { "format": "webp", "with_caption": "...", "no_caption": "..." }
 ```
 
+Before association and export, every model-returned bounding box is expanded by 2% of its width on the left and right and 2% of its height on the top and bottom. The expanded box is clamped to the PDF page bounds and recorded in the manifest.
+
 `format` is one of `"webp"`, `"avif"`, `"png"`, `"jpeg"`, `"jpegxl"` (lowercase, matching
 the format picker's values — note `"jpegxl"` has no separator, while its file extension is
 `.jxl`, mirroring how `"jpeg"` maps to a `.jpg` extension).

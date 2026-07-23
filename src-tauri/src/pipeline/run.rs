@@ -19,6 +19,10 @@ use crate::verify;
 /// used to validate the model during the initial spike).
 pub const DETECTION_DPI: f32 = 200.0;
 
+/// Safety margin added to every side of a bbox returned by the detection
+/// model. The ratio is relative to the bbox's width or height respectively.
+const DETECTION_BBOX_MARGIN_RATIO: f32 = 0.02;
+
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
     PageDetected {
@@ -107,17 +111,26 @@ pub fn process_pdf(
 
         let page_dets: Vec<PageDetection> = raw_dets
             .iter()
-            .map(|d| PageDetection {
-                label: d.label.clone(),
-                score: d.score,
-                bbox_pt: pixel_box_to_pdf_points(
+            .map(|d| {
+                let bbox_pt = pixel_box_to_pdf_points(
                     d.px_x0,
                     d.px_y0,
                     d.px_x1,
                     d.px_y1,
                     DETECTION_DPI,
                     geometry.height_pt,
-                ),
+                )
+                .expanded_by_ratio(
+                    DETECTION_BBOX_MARGIN_RATIO,
+                    geometry.width_pt,
+                    geometry.height_pt,
+                );
+
+                PageDetection {
+                    label: d.label.clone(),
+                    score: d.score,
+                    bbox_pt,
+                }
             })
             .collect();
 
