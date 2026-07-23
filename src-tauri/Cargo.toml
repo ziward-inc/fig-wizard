@@ -1,6 +1,6 @@
 [package]
 name = "figwizard"
-version = "0.2.1"
+version = "0.2.2"
 description = "Extracts figures, tables, formulas, and algorithm blocks from academic paper PDFs as near-4K images"
 authors = ["Sungdon Kim"]
 edition = "2021"
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

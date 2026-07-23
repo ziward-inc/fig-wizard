@@ -31,7 +31,7 @@ export const cancelExtraction = (jobId: string) =>
 export const listResults = (args: { outputDir: string; pdfStem: string }) =>
   invoke<Manifest>("list_results", args)
 
-export const revealInFinder = (path: string) =>
-  invoke<void>("reveal_in_finder", { path })
+export const openResultDir = (path: string) =>
+  invoke<void>("open_result_dir", { path })
 
 export const codexStatus = () => invoke<CodexStatus>("codex_status")

@@ -60,6 +60,7 @@ export function App() {
 
   const [resultsSummary, setResultsSummary] = useState<string | null>(null)
   const [resultsManifest, setResultsManifest] = useState<Manifest | null>(null)
+  const [resultsDir, setResultsDir] = useState<string | null>(null)
 
   // Refs mirror the state above so the long-lived Tauri event listeners
   // (set up once on mount) always see the latest value instead of closing
@@ -106,6 +107,7 @@ export function App() {
         }
         setResultsManifest(null)
         setResultsSummary(null)
+        setResultsDir(null)
       } catch (e) {
         setCurrentPdf(null)
         setPdfError(String(e))
@@ -159,6 +161,7 @@ export function App() {
         setCancelling(false)
         const count = event.payload.objectCount
         setResultsSummary(`${count} object${count === 1 ? "" : "s"} extracted.`)
+        setResultsDir(dirName(event.payload.manifestPath))
         try {
           const manifest = await listResults({
             outputDir: currentOutputDirRef.current!,
@@ -166,7 +169,7 @@ export function App() {
           })
           setResultsManifest(manifest)
         } catch (e) {
-          setResultsSummary((prev) => `${prev} (failed to load gallery: ${e})`)
+          setResultsSummary((prev) => `${prev} (failed to load results: ${e})`)
         }
       }),
       listen<ExtractionErrorPayload>("extraction-error", (event) => {
@@ -236,6 +239,7 @@ export function App() {
     setExtractionError(null)
     setResultsManifest(null)
     setResultsSummary(null)
+    setResultsDir(null)
     setCumulativeCounts({})
     setProgressLabel("Starting extraction…")
     try {
@@ -361,16 +365,17 @@ export function App() {
         </CardContent>
       </Card>
 
-      {resultsManifest && (
+      {resultsManifest && resultsDir && (
         <Card>
           <CardHeader>
             <CardTitle>Results</CardTitle>
           </CardHeader>
           <CardContent>
-            {resultsSummary && (
-              <p className="mb-3 text-sm text-muted-foreground">{resultsSummary}</p>
-            )}
-            <ResultsGallery manifest={resultsManifest} />
+            <ResultsGallery
+              manifest={resultsManifest}
+              resultDir={resultsDir}
+              summary={resultsSummary}
+            />
           </CardContent>
         </Card>
       )}

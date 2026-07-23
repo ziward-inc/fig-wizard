@@ -296,10 +296,6 @@ Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
 
     let pdfium = take_pdfium(&app, &state)?;
 
-    // Make sure the asset protocol can serve images back out of wherever
-    // the user pointed the output dir, before extraction even starts.
-    let _ = app.asset_protocol_scope().allow_directory(&output_dir, true);
-
     let job_id = uuid::Uuid::new_v4().to_string();
     let cancel = Arc::new(AtomicBool::new(false));
     state.jobs.lock().unwrap().insert(job_id.clone(), cancel.clone());
@@ -401,11 +397,9 @@ pub fn cancel_extraction(state: tauri::State<'_, AppState>, job_id: String) -> R
 }
 
 /// Reads back `<output_dir>/<pdf_stem>/manifest.json` written by a prior
-/// `run_extraction` call, and (re-)grants the asset protocol access to that
-/// directory so `convertFileSrc` can load the crop thumbnails - scope is
-/// per-session, so this needs to run again after an app restart too.
+/// `run_extraction` call.
 #[tauri::command]
-pub fn list_results(app: AppHandle, output_dir: String, pdf_stem: String) -> Result<Manifest, String> {
+pub fn list_results(output_dir: String, pdf_stem: String) -> Result<Manifest, String> {
     let doc_dir = PathBuf::from(&output_dir).join(&pdf_stem);
     let manifest_path = doc_dir.join("manifest.json");
     let raw = std::fs::read_to_string(&manifest_path)
@@ -413,16 +407,17 @@ pub fn list_results(app: AppHandle, output_dir: String, pdf_stem: String) -> Res
     let manifest: Manifest =
         serde_json::from_str(&raw).map_err(|e| format!("parsing {manifest_path:?}: {e}"))?;
 
-    let _ = app.asset_protocol_scope().allow_directory(&doc_dir, true);
-
     Ok(manifest)
 }
 
 #[tauri::command]
-pub fn reveal_in_finder(app: AppHandle, path: String) -> Result<(), String> {
+pub fn open_result_dir(app: AppHandle, path: String) -> Result<(), String> {
+    if !Path::new(&path).is_dir() {
+        return Err(format!("Result directory not found: {path}"));
+    }
     app.opener()
-        .reveal_item_in_dir(&path)
-        .map_err(|e| format!("Failed to reveal {path}: {e}"))
+        .open_path(&path, None::<&str>)
+        .map_err(|e| format!("Failed to open {path}: {e}"))
 }
 
 /// Downloads the ONNX model + its config, and the macOS arm64 PDFium dylib

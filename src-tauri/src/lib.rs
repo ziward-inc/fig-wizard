@@ -21,7 +21,7 @@ pub fn run() {
             commands::run_extraction,
             commands::cancel_extraction,
             commands::list_results,
-            commands::reveal_in_finder,
+            commands::open_result_dir,
             commands::codex_status,
         ])
         .run(tauri::generate_context!())

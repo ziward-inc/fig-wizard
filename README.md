@@ -26,13 +26,8 @@ Geist Mono remains `--font-mono` for the monospace bits (file paths, etc).
 
 Layout of `src`:
 
-- `App.tsx` - top-level state (current PDF, output dir/format, job/progress state,
-  results manifest) and the Tauri event-listener wiring; composes the section components
-  below into the four numbered cards plus the results gallery.
-- `components/app/` - the app's own feature components (`ModelBanner`, `PdfDropZone`,
-  `FormatPicker`, `VerifySection`, `ExtractSection`, `ResultsGallery`, `ObjectDialog`,
-  `VerificationBadge`/`VerificationHistory`, `ImageWithFallback`). Each corresponds
-  1:1 to a section/behavior of the original vanilla-JS UI.
+- `App.tsx` - top-level state (current PDF, output dir/format, job/progress state, results manifest) and the Tauri event-listener wiring; composes the section components below into the four numbered cards plus the results list.
+- `components/app/` - the app's own feature components (`ModelBanner`, `PdfDropZone`, `FormatPicker`, `VerifySection`, `ExtractSection`, `ResultsGallery`, and `VerificationBadge`). Each corresponds 1:1 to a section/behavior of the original vanilla-JS UI.
 - `components/ui/` - shadcn-generated primitives (button, card, dialog, etc.) - treat
   these as generated code; re-run `pnpm dlx shadcn@latest add <name>` from the repository root to
   add more or `--overwrite` to regenerate rather than hand-editing them.
@@ -44,7 +39,7 @@ Layout of `src`:
   This is intentional on the Rust side, not a typo - keep it in mind when adding fields.
 - `lib/tauri-commands.ts` - thin typed wrappers around `invoke("command_name", ...)` for
   every `#[tauri::command]` in `commands.rs`.
-- `lib/format.ts` - small pure helpers (`pdfStem`, `dirName`, `formatBytes`, `formatLabel`).
+- `lib/format.ts` - small pure helpers (`pdfStem`, `dirName`, `formatBytes`).
 
 Because `App.tsx` sets up the `listen()` calls once on mount, but needs the *current*
 `currentJobId`/`currentPdf`/`currentOutputDir` inside those long-lived callbacks (to filter
@@ -178,8 +173,7 @@ personal/small-org distribution scope rather than a public, warning-free release
 3. Choose an output format: **WebP, AVIF, PNG, JPEG, or JPEG XL** (radio buttons - exactly
    one is active per run). **WebP is the default.** JPEG XL is encoded by libjxl bundled into the app and requires no separate install.
 4. Click "Extract" and watch the live per-page progress and running counts by kind.
-5. When done, browse the results gallery (grouped by page, click a thumbnail for the full
-   crop plus both output file paths and a "Reveal in Finder" action).
+5. When done, browse the text-only results list grouped by page. Click "OPEN" to open the result directory in Finder.
 
 Extraction writes to
 `<output_dir>/<pdf-stem>/page-NNNN/<kind>-NN_{with,no}-caption_q85.<ext>` for the lossy
@@ -195,17 +189,7 @@ formats like earlier versions of this app. Re-running extraction on the same PDF
 different format selected will (over)write a fresh set of files (and a fresh
 `manifest.json`) using that format.
 
-**Gallery preview limitation:** the results gallery's thumbnails and modal preview try to
-render every format inline via an `<img>` tag. In practice, PNG/JPEG/WebP display reliably
-in Tauri's WKWebView on macOS 15+; **AVIF's inline support has been inconsistent across
-WebKit/Safari versions**, and **JPEG XL has no inline `<img>` support in WebKit at all** as
-of this writing - neither is something this app can guarantee/work around ahead of time.
-Rather than hardcode per-format support (which would silently go stale as WebKit changes),
-the gallery detects a real image-load failure per-file and falls back to a generic
-file-icon + filename placeholder for that thumbnail/preview - "Reveal in Finder" still
-works regardless. If you pick AVIF or JPEG XL and see placeholder icons instead of
-thumbnails, that's this fallback kicking in, not a bug in the export itself (the files are
-still valid AVIF/JPEG XL - see the manifest and try opening one directly, or via `djxl`).
+The results UI intentionally does not render the exported images inline. Use "OPEN" to inspect any format directly in Finder without loading every image into the WebView.
 
 ### `manifest.json` schema change: `files` shape
 
@@ -272,12 +256,7 @@ Finder-launched macOS apps do not inherit the same `PATH` as a terminal. FigWiza
   (with a clear error) rather than silently doing nothing per-object if Codex isn't
   available at all.
 
-**Per-object attempt counts are always visible when this feature was used**: `manifest.json`
-gets a `verification: { enabled, attempts, passed, last_issue, history }` field per object
-(absent entirely when the checkbox was off for that run), and the results gallery shows a
-small badge on each thumbnail/modal - "✓ 1 try" (passed first try), "⟳ N tries" (passed
-after Codex-suggested corrections), or "⚠ N tries, still flagged" (never passed within the
-attempt budget). No badge is shown at all when verification wasn't enabled for that run.
+**Per-object attempt counts are always visible when this feature was used**: `manifest.json` gets a `verification: { enabled, attempts, passed, last_issue, history }` field per object (absent entirely when the checkbox was off for that run), and the results list shows a small badge on each row - "✓ 1 try" (passed first try), "⟳ N tries" (passed after Codex-suggested corrections), or "⚠ N tries, still flagged" (never passed within the attempt budget). No badge is shown at all when verification wasn't enabled for that run.
 
 **Full per-attempt history, not just the final outcome.** `verification.history` is an
 array with one entry per real attempt (in order), each shaped like:
@@ -290,12 +269,7 @@ array with one entry per real attempt (in order), each shaped like:
 suggestion for that attempt, before the app's capping/clamping is applied; it's `null` on
 a passed attempt, or on a soft failure where Codex itself couldn't be invoked/parsed - see
 `"verification_error: ..."` issues below.) `attempts`/`passed`/`last_issue` are still
-present as convenience fields summarizing the same data (`attempts == history.length`,
-`last_issue` mirrors the last history entry's `issue`) so anything that only needs the
-summary doesn't need to touch the array. In the results gallery, clicking a thumbnail opens
-the modal as before, which now also has an expandable "Attempt history (N)" section listing
-every attempt ("Attempt 1: extra_content_top - <reason>", "Attempt 2: passed - <reason>",
-etc.) so you can see exactly why each retry happened, not just how many there were.
+present as convenience fields summarizing the same data (`attempts == history.length`, `last_issue` mirrors the last history entry's `issue`) so anything that only needs the summary doesn't need to touch the array. Read `manifest.json` when the full reason and bounding-box adjustment for each attempt are needed.
 
 ## Known limitations / gaps (read before filing a bug)
 
