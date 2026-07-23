@@ -93,8 +93,15 @@ Shipping a build that opens with no Gatekeeper warning would require:
 
 ## Releasing a new version
 
-Run these commands from the repository root on a clean `main` branch. Choose a new,
-unused patch/minor/major version and replace `0.2.7` below.
+Run from the repository root on a clean `main` branch, with a new, unused version:
+
+```sh
+./deploy.sh v0.2.8
+```
+
+This bumps the version, builds and verifies the DMG, then commits, tags, pushes, and
+publishes the GitHub release. It's what `deploy.sh` runs, step by step, for reference or
+manual fallback:
 
 ```sh
 VERSION=0.2.7
