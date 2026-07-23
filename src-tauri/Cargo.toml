@@ -1,6 +1,7 @@
 [package]
 name = "figwizard"
 version = "0.2.6"
+license = "Apache-2.0"
 description = "Extracts figures, tables, formulas, and algorithm blocks from academic paper PDFs as near-4K images"
 authors = ["Sungdon Kim"]
 edition = "2021"

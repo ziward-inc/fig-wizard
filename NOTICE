@@ -1,0 +1,39 @@
+FigWizard
+Copyright 2026 Ziward, Inc.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It bundles or downloads the following third-party components at build time or on first
+run. Their content is not covered by FigWizard's own license; each remains under its own
+terms as noted below.
+
+--------------------------------------------------------------------------------
+
+PDFium (downloaded on first run as a prebuilt macOS arm64 dylib)
+  Source:  https://github.com/bblanchon/pdfium-binaries
+  License: PDFium itself (Google/Chromium) is dual-licensed BSD-3-Clause OR Apache-2.0
+           (https://pdfium.googlesource.com/pdfium/+/main/LICENSE).
+           The bblanchon/pdfium-binaries packaging/build scripts are separately licensed
+           MIT, Copyright (c) 2014-2025 Benoit Blanchon
+           (https://github.com/bblanchon/pdfium-binaries/blob/master/LICENSE).
+
+PP-DocLayoutV3 (ONNX export, downloaded on first run as the layout-detection model)
+  Source:  https://huggingface.co/alex-dinh/PP-DocLayoutV3-ONNX
+           (ONNX export of https://huggingface.co/PaddlePaddle/PP-DocLayoutV3)
+  License: Apache License, Version 2.0
+           (https://github.com/PaddlePaddle/PaddleX/blob/develop/LICENSE)
+
+libjxl (statically linked into the app for JPEG XL encoding, via the gamut-jxl /
+gamut-jxl-sys Rust crates)
+  Source:  https://github.com/libjxl/libjxl
+  License: BSD-3-Clause (https://github.com/libjxl/libjxl/blob/main/LICENSE)
+           Bundles highway, brotli, and skcms under their own compatible licenses; see
+           libjxl's own NOTICE/LICENSE for details.
+
+gamut-jxl / gamut-jxl-sys (Rust bindings to libjxl)
+  Source:  https://github.com/justin13888/gamut
+  License: MIT OR Apache-2.0, at your option
+
+SUITE Variable (vendored at public/fonts/SUITE-Variable.woff2, used as the app's UI font)
+  Source:  https://github.com/sun-typeface/SUITE
+  License: SIL Open Font License, Version 1.1
