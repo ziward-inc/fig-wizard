@@ -41,9 +41,9 @@ export function FormatPicker({
         </Label>
       </RadioGroup>
       <p className="text-sm text-muted-foreground">
-        Every crop is exported as exactly one format (with-caption and no-caption
-        files, quality 85 for lossy formats; PNG is lossless). JPEG XL uses the
-        reference libjxl encoder bundled into the app.
+        Every crop is exported as exactly one format (with-caption and
+        no-caption files, quality 85 for lossy formats; PNG is lossless). JPEG
+        XL uses the reference libjxl encoder bundled into the app.
       </p>
     </>
   )

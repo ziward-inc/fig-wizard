@@ -31,7 +31,11 @@ export function ExtractSection({
           Extract
         </Button>
         {busy && (
-          <Button variant="destructive" onClick={onCancel} disabled={cancelling}>
+          <Button
+            variant="destructive"
+            onClick={onCancel}
+            disabled={cancelling}
+          >
             Cancel
           </Button>
         )}

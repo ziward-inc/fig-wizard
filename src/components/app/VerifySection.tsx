@@ -22,9 +22,9 @@ export function VerifySection({
 
       {checked && (
         <p className="mt-2 mb-2 text-sm text-muted-foreground">
-          Uses the <code>codex</code> CLI to double-check each crop and correct it
-          if it's cut off or includes too much extra content, retrying up to 3
-          times per object. Requires network access and adds a Codex call per
+          Uses the <code>codex</code> CLI to double-check each crop and correct
+          it if it's cut off or includes too much extra content, retrying up to
+          3 times per object. Requires network access and adds a Codex call per
           object on top of the existing (already CPU/time-heavy) extraction
           pipeline.
         </p>

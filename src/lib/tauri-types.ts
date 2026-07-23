@@ -5,7 +5,13 @@
 // and use camelCase keys instead - keep that distinction when adding
 // fields, it's intentional on the Rust side, not a typo here.
 
-export type Kind = "figure" | "table" | "formula" | "algorithm" | "aside" | "seal"
+export type Kind =
+  | "figure"
+  | "table"
+  | "formula"
+  | "algorithm"
+  | "aside"
+  | "seal"
 
 export type OutputFormat = "webp" | "avif" | "png" | "jpeg" | "jpegxl"
 

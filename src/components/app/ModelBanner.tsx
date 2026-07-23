@@ -2,7 +2,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { formatBytes } from "@/lib/format"
-import type { ModelDownloadProgressPayload, ModelStatus } from "@/lib/tauri-types"
+import type {
+  ModelDownloadProgressPayload,
+  ModelStatus,
+} from "@/lib/tauri-types"
 
 const STAGE_LABELS: Record<string, string> = {
   config: "Downloading config…",
@@ -34,7 +37,12 @@ export function ModelBanner({
 
   const pct =
     downloadProgress && downloadProgress.total > 0
-      ? Math.min(100, Math.round((downloadProgress.downloaded / downloadProgress.total) * 100))
+      ? Math.min(
+          100,
+          Math.round(
+            (downloadProgress.downloaded / downloadProgress.total) * 100
+          )
+        )
       : null
 
   return (
@@ -48,7 +56,11 @@ export function ModelBanner({
             Missing: {missing.join(" and ")}.
           </AlertDescription>
         </div>
-        <Button size="sm" onClick={onDownload} disabled={downloadState === "downloading"}>
+        <Button
+          size="sm"
+          onClick={onDownload}
+          disabled={downloadState === "downloading"}
+        >
           Download model (~125MB)
         </Button>
       </div>
@@ -56,7 +68,9 @@ export function ModelBanner({
       {downloadState !== "idle" && (
         <div className="mt-3">
           {downloadState === "error" ? (
-            <p className="text-sm text-destructive">Download failed: {downloadError}</p>
+            <p className="text-sm text-destructive">
+              Download failed: {downloadError}
+            </p>
           ) : (
             <>
               <div className="mb-1 flex justify-between text-sm text-muted-foreground">
@@ -67,8 +81,8 @@ export function ModelBanner({
                       : "Starting download…")}
                 </span>
                 <span>
-                  {pct !== null
-                    ? `${pct}% (${formatBytes(downloadProgress!.downloaded)} / ${formatBytes(downloadProgress!.total)})`
+                  {downloadProgress && pct !== null
+                    ? `${pct}% (${formatBytes(downloadProgress.downloaded)} / ${formatBytes(downloadProgress.total)})`
                     : downloadProgress
                       ? formatBytes(downloadProgress.downloaded)
                       : "0%"}

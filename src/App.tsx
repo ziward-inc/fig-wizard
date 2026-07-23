@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ExtractSection } from "@/components/app/ExtractSection"
 import { FormatPicker } from "@/components/app/FormatPicker"
-import { ModelBanner, type DownloadState } from "@/components/app/ModelBanner"
+import { type DownloadState, ModelBanner } from "@/components/app/ModelBanner"
 import { PdfDropZone } from "@/components/app/PdfDropZone"
 import { ResultsGallery } from "@/components/app/ResultsGallery"
 import { VerifySection } from "@/components/app/VerifySection"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { dirName, pdfStem } from "@/lib/format"
 import {
   cancelExtraction,
   codexStatus,
   downloadModel,
-  listResults,
   modelStatus as fetchModelStatus,
+  listResults,
   openPdf,
   pickOutputDir,
   pickPdfFile,
@@ -37,7 +36,9 @@ import type {
 export function App() {
   const [currentPdf, setCurrentPdfState] = useState<PdfInfo | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
-  const [currentOutputDir, setCurrentOutputDirState] = useState<string | null>(null)
+  const [currentOutputDir, setCurrentOutputDirState] = useState<string | null>(
+    null
+  )
   const [outputDirIsDefaulted, setOutputDirIsDefaulted] = useState(false)
 
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null)
@@ -55,7 +56,9 @@ export function App() {
   const [currentJobId, setCurrentJobIdState] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [progressLabel, setProgressLabel] = useState("Starting extraction…")
-  const [cumulativeCounts, setCumulativeCounts] = useState<Record<string, number>>({})
+  const [cumulativeCounts, setCumulativeCounts] = useState<
+    Record<string, number>
+  >({})
   const [extractionError, setExtractionError] = useState<string | null>(null)
 
   const [resultsSummary, setResultsSummary] = useState<string | null>(null)
@@ -87,7 +90,11 @@ export function App() {
       const status = await fetchModelStatus()
       setModelStatus(status)
     } catch {
-      setModelStatus({ model_present: false, pdfium_present: false, using_dev_assets: false })
+      setModelStatus({
+        model_present: false,
+        pdfium_present: false,
+        using_dev_assets: false,
+      })
     }
   }, [])
 
@@ -122,7 +129,9 @@ export function App() {
       .onDragDropEvent((event) => {
         if (event.payload.type !== "drop") return
         if (currentJobIdRef.current) return // PDFium is in use by the running extraction
-        const path = event.payload.paths.find((p) => p.toLowerCase().endsWith(".pdf"))
+        const path = event.payload.paths.find((p) =>
+          p.toLowerCase().endsWith(".pdf")
+        )
         if (path) {
           loadPdf(path)
         } else {
@@ -135,13 +144,16 @@ export function App() {
       })
     return () => unlistenDragDrop?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [setCurrentPdf, loadPdf])
 
   useEffect(() => {
     const unlistenPromises = [
-      listen<ModelDownloadProgressPayload>("model-download-progress", (event) => {
-        setDownloadProgress(event.payload)
-      }),
+      listen<ModelDownloadProgressPayload>(
+        "model-download-progress",
+        (event) => {
+          setDownloadProgress(event.payload)
+        }
+      ),
       listen<PageDetectedPayload>("page-detected", (event) => {
         if (event.payload.jobId !== currentJobIdRef.current) return
         setProgressLabel(
@@ -155,23 +167,34 @@ export function App() {
           [event.payload.kind]: (prev[event.payload.kind] ?? 0) + 1,
         }))
       }),
-      listen<ExtractionCompletePayload>("extraction-complete", async (event) => {
-        if (event.payload.jobId !== currentJobIdRef.current) return
-        setCurrentJobId(null)
-        setCancelling(false)
-        const count = event.payload.objectCount
-        setResultsSummary(`${count} object${count === 1 ? "" : "s"} extracted.`)
-        setResultsDir(dirName(event.payload.manifestPath))
-        try {
-          const manifest = await listResults({
-            outputDir: currentOutputDirRef.current!,
-            pdfStem: pdfStem(currentPdfRef.current!.path),
-          })
-          setResultsManifest(manifest)
-        } catch (e) {
-          setResultsSummary((prev) => `${prev} (failed to load results: ${e})`)
+      listen<ExtractionCompletePayload>(
+        "extraction-complete",
+        async (event) => {
+          if (event.payload.jobId !== currentJobIdRef.current) return
+          setCurrentJobId(null)
+          setCancelling(false)
+          const count = event.payload.objectCount
+          setResultsSummary(
+            `${count} object${count === 1 ? "" : "s"} extracted.`
+          )
+          setResultsDir(dirName(event.payload.manifestPath))
+          const outputDir = currentOutputDirRef.current
+          const currentPdf = currentPdfRef.current
+          if (outputDir && currentPdf) {
+            try {
+              const manifest = await listResults({
+                outputDir,
+                pdfStem: pdfStem(currentPdf.path),
+              })
+              setResultsManifest(manifest)
+            } catch (e) {
+              setResultsSummary(
+                (prev) => `${prev} (failed to load results: ${e})`
+              )
+            }
+          }
         }
-      }),
+      ),
       listen<ExtractionErrorPayload>("extraction-error", (event) => {
         if (event.payload.jobId !== currentJobIdRef.current) return
         setExtractionError(event.payload.message)
@@ -180,7 +203,9 @@ export function App() {
       }),
     ]
     return () => {
-      unlistenPromises.forEach((p) => p.then((fn) => fn()))
+      unlistenPromises.forEach((p) => {
+        void p.then((fn) => fn())
+      })
     }
   }, [setCurrentJobId])
 
@@ -253,7 +278,13 @@ export function App() {
     } catch (e) {
       setExtractionError(String(e))
     }
-  }, [currentOutputDir, currentPdf, outputFormat, setCurrentJobId, verifyChecked])
+  }, [
+    currentOutputDir,
+    currentPdf,
+    outputFormat,
+    setCurrentJobId,
+    verifyChecked,
+  ])
 
   const handleCancel = useCallback(async () => {
     if (!currentJobId) return
@@ -266,15 +297,20 @@ export function App() {
     }
   }, [currentJobId])
 
-  const modelReady = !!(modelStatus?.model_present && modelStatus?.pdfium_present)
+  const modelReady = !!(
+    modelStatus?.model_present && modelStatus?.pdfium_present
+  )
   const busy = currentJobId !== null
   const extractReasons: string[] = []
   if (!currentPdf) extractReasons.push("choose a PDF")
   if (!currentOutputDir) extractReasons.push("choose an output folder")
   if (!modelReady) extractReasons.push("model not ready — download it above")
-  if (verifyChecked && codexAvailable === false) extractReasons.push("Codex CLI not available")
+  if (verifyChecked && codexAvailable === false)
+    extractReasons.push("Codex CLI not available")
   const extractDisabled = extractReasons.length > 0 || busy
-  const disabledReason = extractReasons.length ? `Waiting on: ${extractReasons.join(", ")}` : ""
+  const disabledReason = extractReasons.length
+    ? `Waiting on: ${extractReasons.join(", ")}`
+    : ""
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-8 pb-16">
@@ -283,8 +319,8 @@ export function App() {
           PDF Paper Image Extractor
         </h1>
         <p className="text-muted-foreground">
-          Pull figures, tables, formulas, and algorithm blocks out of an academic
-          paper PDF.
+          Pull figures, tables, formulas, and algorithm blocks out of an
+          academic paper PDF.
         </p>
       </header>
 
@@ -316,7 +352,9 @@ export function App() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={handleChooseOutputDir}>Choose output folder…</Button>
+            <Button onClick={handleChooseOutputDir}>
+              Choose output folder…
+            </Button>
             <span className="text-sm text-muted-foreground">
               {currentOutputDir
                 ? outputDirIsDefaulted

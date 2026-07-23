@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import type { PdfInfo } from "@/lib/tauri-types"
+import { cn } from "@/lib/utils"
 
 export function PdfDropZone({
   currentPdf,
@@ -35,7 +35,9 @@ export function PdfDropZone({
         </p>
       )}
       {pdfError && (
-        <p className="mt-2 text-sm break-all text-muted-foreground">{pdfError}</p>
+        <p className="mt-2 text-sm break-all text-muted-foreground">
+          {pdfError}
+        </p>
       )}
     </>
   )

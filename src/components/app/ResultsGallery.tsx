@@ -3,8 +3,8 @@ import { useMemo } from "react"
 import { VerificationBadge } from "@/components/app/VerificationBadge"
 import { Button } from "@/components/ui/button"
 import { openResultDir } from "@/lib/tauri-commands"
-import { cn } from "@/lib/utils"
 import type { Manifest, ManifestEntry } from "@/lib/tauri-types"
+import { cn } from "@/lib/utils"
 
 const KIND_LABEL_COLOR: Record<string, string> = {
   figure: "text-blue-700 dark:text-blue-400",
