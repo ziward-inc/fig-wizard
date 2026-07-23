@@ -25,11 +25,6 @@ export interface CodexStatus {
   detail: string
 }
 
-export interface CjxlStatus {
-  available: boolean
-  detail: string
-}
-
 export interface ExportedFiles {
   format: string
   with_caption: string

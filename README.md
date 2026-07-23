@@ -176,10 +176,7 @@ personal/small-org distribution scope rather than a public, warning-free release
 2. Pick an output folder (defaults to an `extracted/` folder next to the PDF; override with
    "Choose output folder…").
 3. Choose an output format: **WebP, AVIF, PNG, JPEG, or JPEG XL** (radio buttons - exactly
-   one is active per run). **WebP is the default.** JPEG XL requires the `cjxl` CLI
-   (`brew install jpeg-xl`) to be installed locally - its radio is greyed out until the app
-   confirms `cjxl` is available, and re-checks automatically at startup. See "JPEG XL:
-   shipped via a `cjxl` subprocess" below for how this works and why.
+   one is active per run). **WebP is the default.** JPEG XL is encoded by libjxl bundled into the app and requires no separate install.
 4. Click "Extract" and watch the live per-page progress and running counts by kind.
 5. When done, browse the results gallery (grouped by page, click a thumbnail for the full
    crop plus both output file paths and a "Reveal in Finder" action).
@@ -235,48 +232,13 @@ before this change will fail to parse against the new
 silently reading stale data as if it were current); re-run extraction to get a manifest in
 the new shape.
 
-### JPEG XL: shipped via a `cjxl` subprocess
+### JPEG XL: bundled libjxl encoder
 
-JPEG XL was initially evaluated as a 5th output format via two Rust crates, and neither
-was wired in. The user-specified crate, **`jxl-rs`** (`libjxl/jxl-rs` on GitHub - a
-from-scratch pure-Rust reimplementation maintained by the JPEG XL/libjxl team), turned out
-to be an **explicitly decode-only, work-in-progress JPEG XL decoder**: its own README
-states "This is a work-in-progress reimplementation of a JPEG XL **decoder** in Rust," its
-`jxl` crate has no `encode` module anywhere in its source tree (only `frame`/`headers`/
-`render`/`entropy_coding`/`color`/etc - all decode-pipeline stages), and it isn't published
-on crates.io under that name at all. The alternative, **`jpegxl-rs`** (safe Rust bindings
-to the real, reference `libjxl`), does encode real JPEG XL files correctly, but is licensed
-**GPL-3.0-or-later** on the bindings themselves - even though libjxl the underlying C
-library is BSD-3-Clause, linking those bindings into a *distributed* build of this app
-would make it subject to GPL-3.0 copyleft. Neither crate was an acceptable path.
+JPEG XL is encoded in-process by the reference libjxl implementation, statically linked through the permissively licensed `gamut-jxl`/`gamut-jxl-sys` Rust wrapper. The app bundle therefore has no runtime dependency on Homebrew, `cjxl`, or another system library.
 
-The approach that **is** shipped instead: `pipeline::export::encode_jpegxl` shells out to
-libjxl's own `cjxl` command-line encoder as an external subprocess - exactly the same
-pattern this codebase already uses for the optional Codex crop-verification feature (see
-`verify::run_codex_verify`/`verify::run_with_timeout`, whose subprocess/timeout-handling
-machinery `encode_jpegxl` directly reuses via `verify::run_with_timeout`). Because `cjxl`
-runs as a separate process rather than being linked into the app binary, no GPL-licensed
-code ever ends up in a distributed build - only the BSD-3-Clause `libjxl` C library itself
-is invoked, as a tool, not a dependency.
+The fixed JPEG-style quality of 85 is converted with libjxl's public `JxlEncoderDistanceFromQuality` mapping to a Butteraugli distance of 1.45, preserving the quality setting previously passed to `cjxl -q 85`. The encoder emits a bare JPEG XL codestream beginning with `FF 0A`; `tests/export_formats.rs` exercises it unconditionally with the other four formats.
 
-Concretely, `encode_jpegxl` writes the crop to a temp PNG (via the `image` crate, already a
-dependency), then runs `cjxl <temp.png> <temp.jxl> -q 85` (the same quality=85 used for
-every other lossy format, on `cjxl`'s own "roughly matches libjpeg quality" 0-100 scale),
-reads back the resulting `.jxl` codestream, and cleans up both temp files afterward
-regardless of success/failure. This was verified end-to-end on this machine: `cjxl`
-produces a file with the real JPEG XL codestream magic bytes (`FF 0A`), `file`/`sips`
-recognize it as "JPEG XL codestream", and `djxl output.jxl decoded.png` round-trips it back
-to a PNG with matching pixel dimensions.
-
-**Prerequisite: `cjxl` must be installed locally** (`brew install jpeg-xl` on macOS) -
-unlike the other 4 formats, which are fully self-contained via linked-in Rust crates, this
-one depends on an external binary being on `PATH`. The app checks for it automatically at
-startup (`cjxl_status`/`cjxl --version`, mirroring `codex_status`'s pattern exactly) and
-keeps the "JPEG XL" radio disabled with an explanatory tooltip until `cjxl` is found; it
-also re-checks as a hard preflight (failing fast with a clear error) if `run_extraction` is
-somehow called with `jpegxl` selected while `cjxl` isn't available. `tests/export_formats.rs`
-exercises the same `cjxl_available()` check to skip its JPEG XL case gracefully (rather than
-hard-failing the suite) on a machine without libjxl installed.
+Building from source requires CMake and a C++ toolchain because libjxl is compiled and statically linked at build time. This does not affect `.dmg` or one-line-script installations: end users receive the already-built encoder inside `FigWizard.app`.
 
 ## Optional: verify crops with Codex (off by default)
 
@@ -289,6 +251,8 @@ When checked, before each detected object is exported the app shells out to the 
 `codex` CLI (OpenAI's coding agent, used here purely as a multimodal judge - no code is
 read or edited) with the current crop image and asks it to judge, per a structured JSON
 schema, whether the crop is a clean, complete, standalone image of that object:
+
+Finder-launched macOS apps do not inherit the same `PATH` as a terminal. FigWizard therefore resolves Codex from both `PATH` and common per-user install locations such as `~/.local/bin` and `~/.npm-global/bin`. For npm installs, it launches the platform-native Codex binary inside the package instead of the JavaScript wrapper, so the wrapper's `#!/usr/bin/env node` does not introduce the same `PATH` failure again.
 
 - If Codex says the crop passes, it's exported as-is.
 - If Codex flags an issue (cut off on some side, or including too much irrelevant extra
@@ -337,8 +301,7 @@ etc.) so you can see exactly why each retry happened, not just how many there we
 
 - **Extraction is slow.** This is a CPU-bound pipeline: ONNX layout detection per page plus
   near-4K image encoding per object (AVIF is the slowest of the 5 shipped formats to
-  encode; PNG/JPEG/WebP are faster; JPEG XL's `cjxl` subprocess adds its own process-spawn
-  overhead on top of encode time), no GPU acceleration. A 15-page paper with ~17
+  encode; PNG/JPEG/WebP are faster), no GPU acceleration. A 15-page paper with ~17
   extracted objects takes on the order of ten-plus minutes on a laptop CPU with AVIF
   selected. The UI treats this as a real background job (live progress events,
   cancellable) rather than pretending it's fast — expect multi-minute runs on longer

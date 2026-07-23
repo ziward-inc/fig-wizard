@@ -23,7 +23,6 @@ pub fn run() {
             commands::list_results,
             commands::reveal_in_finder,
             commands::codex_status,
-            commands::cjxl_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

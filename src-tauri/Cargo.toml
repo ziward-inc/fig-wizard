@@ -1,6 +1,6 @@
 [package]
 name = "figwizard"
-version = "0.2.0"
+version = "0.2.1"
 description = "Extracts figures, tables, formulas, and algorithm blocks from academic paper PDFs as near-4K images"
 authors = ["Sungdon Kim"]
 edition = "2021"
@@ -28,6 +28,8 @@ image = "0.25.10"
 webp = "0.3.1"
 ravif = "0.13.0"
 rgb = "0.8.53"
+gamut-core = "2.0.1"
+gamut-jxl = { version = "0.4.0", default-features = false, features = ["encode"] }
 tokio = { version = "1.53.1", features = ["full"] }
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-fs = "2.5.1"

@@ -40,8 +40,10 @@ use anyhow::{Context, Result};
 use image::RgbImage;
 use pdfium_render::prelude::PdfPage;
 use serde::Deserialize;
+use std::env;
 use std::io::Read;
-use std::path::Path;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -149,23 +151,101 @@ struct BboxAdjustment {
     right: f32,
 }
 
-/// Quick check for whether the `codex` binary is callable at all (on
-/// `PATH`, executes without erroring). Used both as an upfront preflight
-/// before starting a whole extraction run with verification enabled, and is
-/// safe to call cheaply/often (it just runs `codex --version`).
+/// Resolves Codex from the process `PATH` and the common per-user install
+/// locations that Finder-launched macOS apps do not inherit. npm installs
+/// use a JavaScript launcher whose `#!/usr/bin/env node` would have the same
+/// GUI `PATH` problem, so those launchers are mapped to the platform-native
+/// Codex binary shipped inside the npm package.
+fn resolve_codex_binary() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&path).map(|dir| dir.join("codex")));
+    }
+
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        for relative in [
+            ".local/bin/codex",
+            ".npm-global/bin/codex",
+            ".npm/bin/codex",
+            ".cargo/bin/codex",
+            ".bun/bin/codex",
+            ".volta/bin/codex",
+            "Library/pnpm/codex",
+        ] {
+            candidates.push(home.join(relative));
+        }
+    }
+
+    candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
+    candidates.push(PathBuf::from("/usr/local/bin/codex"));
+
+    for candidate in candidates {
+        if is_executable(&candidate) {
+            return Ok(resolve_npm_native_binary(&candidate).unwrap_or(candidate));
+        }
+    }
+
+    Err("codex binary not found on PATH or in common user install locations".to_string())
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.metadata()
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+fn resolve_npm_native_binary(launcher: &Path) -> Option<PathBuf> {
+    let launcher = launcher.canonicalize().ok()?;
+    if launcher.file_name()?.to_str()? != "codex.js" {
+        return None;
+    }
+
+    let package_root = launcher.parent()?.parent()?;
+    let (platform_package, target_triple) = match (env::consts::OS, env::consts::ARCH) {
+        ("macos", "aarch64") => ("codex-darwin-arm64", "aarch64-apple-darwin"),
+        ("macos", "x86_64") => ("codex-darwin-x64", "x86_64-apple-darwin"),
+        ("linux", "aarch64") => ("codex-linux-arm64", "aarch64-unknown-linux-musl"),
+        ("linux", "x86_64") => ("codex-linux-x64", "x86_64-unknown-linux-musl"),
+        _ => return None,
+    };
+    let package = Path::new("@openai").join(platform_package);
+    let binary_tail = Path::new("vendor").join(target_triple).join("bin").join("codex");
+
+    let bundled = package_root.join(&binary_tail);
+    if is_executable(&bundled) {
+        return Some(bundled);
+    }
+
+    for ancestor in package_root.ancestors().take(8) {
+        let candidate = ancestor.join("node_modules").join(&package).join(&binary_tail);
+        if is_executable(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// Quick check for whether the resolved `codex` binary executes without
+/// erroring. Used as an upfront preflight before starting a whole extraction
+/// run with verification enabled.
 pub fn codex_available() -> Result<String, String> {
-    let mut cmd = Command::new("codex");
+    let binary = resolve_codex_binary()?;
+    let mut cmd = Command::new(&binary);
     cmd.arg("--version");
     match run_with_timeout(cmd, Duration::from_secs(10), true) {
-        Ok(output) if output.status.success() => {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        }
+        Ok(output) if output.status.success() => Ok(format!(
+            "{} ({})",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            binary.display()
+        )),
         Ok(output) => Err(format!(
             "codex --version exited with {}: {}",
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         )),
-        Err(e) => Err(format!("codex binary not runnable: {e}")),
+        Err(e) => Err(format!("codex binary not runnable at {}: {e}", binary.display())),
     }
 }
 
@@ -369,7 +449,8 @@ fn run_codex_verify(
     work_dir: &Path,
     prompt: &str,
 ) -> Result<VerifyResult> {
-    let mut cmd = Command::new("codex");
+    let binary = resolve_codex_binary().map_err(anyhow::Error::msg)?;
+    let mut cmd = Command::new(binary);
     cmd.arg("exec")
         .arg("-i")
         .arg(image_path)
@@ -412,10 +493,7 @@ fn run_codex_verify(
 /// be large), but the quick `codex --version` preflight check does, to
 /// surface the version string to the UI.
 ///
-/// `pub(crate)` (rather than private) so `pipeline::export`'s `cjxl`
-/// subprocess calls (JPEG XL encoding + its availability preflight) can
-/// reuse the same timeout/kill/drain machinery instead of duplicating it.
-pub(crate) fn run_with_timeout(
+fn run_with_timeout(
     mut cmd: Command,
     timeout: Duration,
     capture_stdout: bool,
@@ -454,10 +532,6 @@ pub(crate) fn run_with_timeout(
                     let _ = child.wait();
                     let _ = stdout_handle.join();
                     let _ = stderr_handle.join();
-                    // Generic message: this helper is shared by both the
-                    // `codex` calls in this module and `pipeline::export`'s
-                    // `cjxl` calls (see the `pub(crate)` doc comment above),
-                    // so it can't hardcode either binary's name.
                     return Err(format!("process timed out after {}s", timeout.as_secs()));
                 }
                 std::thread::sleep(Duration::from_millis(150));
@@ -485,6 +559,16 @@ mod tests {
 
     fn no_adjust() -> BboxAdjustment {
         BboxAdjustment { top: 0.0, bottom: 0.0, left: 0.0, right: 0.0 }
+    }
+
+    #[test]
+    #[ignore = "requires an installed Codex CLI"]
+    fn installed_codex_resolves_to_runnable_binary() {
+        let binary = resolve_codex_binary().expect("resolve installed Codex CLI");
+        assert!(is_executable(&binary), "not executable: {}", binary.display());
+        assert_ne!(binary.file_name().and_then(|name| name.to_str()), Some("codex.js"));
+        let status = codex_available().expect("run installed Codex CLI");
+        assert!(status.contains("codex-cli"), "unexpected status: {status}");
     }
 
     #[test]

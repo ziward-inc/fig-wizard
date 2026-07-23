@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import type {
-  CjxlStatus,
   CodexStatus,
   Manifest,
   ModelStatus,
@@ -36,5 +35,3 @@ export const revealInFinder = (path: string) =>
   invoke<void>("reveal_in_finder", { path })
 
 export const codexStatus = () => invoke<CodexStatus>("codex_status")
-
-export const cjxlStatus = () => invoke<CjxlStatus>("cjxl_status")

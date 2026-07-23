@@ -8,17 +8,11 @@
 //! (2 pages) rather than the 12-page `ppo.pdf`/`attention.pdf` so running
 //! this once per format stays fast.
 //!
-//! `OutputFormat::JpegXl` is exercised too, but only if the `cjxl` CLI
-//! (libjxl, `brew install jpeg-xl`) is actually available on this machine -
-//! unlike the other 4 formats, which are fully self-contained via linked-in
-//! Rust crates, JPEG XL shells out to an external system binary (see
-//! `pipeline::export::encode_jpegxl` / `cjxl_available`). Rather than hard
-//! failing the whole suite on a machine without libjxl installed, that case
-//! is skipped with a clear printed message.
+//! All five formats, including the statically linked JPEG XL encoder, are
+//! exercised unconditionally.
 
 use figwizard_lib::detect::DEFAULT_SCORE_THRESH;
 use figwizard_lib::pdf::render::{init_pdfium, ClipRenderBudget};
-use figwizard_lib::pipeline::export::cjxl_available;
 use figwizard_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
 use figwizard_lib::pipeline::types::OutputFormat;
 use pdfium_render::prelude::Pdfium;
@@ -67,11 +61,8 @@ fn assert_valid_magic_bytes(format: OutputFormat, data: &[u8]) {
             );
         }
         OutputFormat::JpegXl => {
-            // Raw JPEG XL codestream magic bytes - confirmed manually on
-            // this machine: `cjxl input.png output.jxl -q 85` produces a
-            // file starting with `FF 0A` (not the ISOBMFF `.jxl` container
-            // form, which starts with a box header instead - `cjxl`'s
-            // default output is the bare codestream).
+            // Raw JPEG XL codestream magic bytes. The bundled encoder emits
+            // a bare codestream rather than the ISOBMFF container form.
             assert!(
                 data.starts_with(&[0xFF, 0x0A]),
                 "not a valid JPEG XL codestream signature: {:?}",
@@ -170,23 +161,13 @@ fn export_all_formats_produce_valid_files() {
 
     let pdfium = init_pdfium(&pdfium_dir).expect("init pdfium");
 
-    for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Png, OutputFormat::Jpeg] {
+    for format in [
+        OutputFormat::Webp,
+        OutputFormat::Avif,
+        OutputFormat::Png,
+        OutputFormat::Jpeg,
+        OutputFormat::JpegXl,
+    ] {
         run_for_format(&pdfium, &root, &model_path, labels.clone(), format);
-    }
-
-    // JPEG XL depends on an external system binary (`cjxl`, not a linked-in
-    // crate like the other 4 formats) - skip gracefully rather than failing
-    // the whole suite on a machine that doesn't have libjxl installed.
-    match cjxl_available() {
-        Ok(version) => {
-            println!("cjxl available ({version}) - running JpegXl case");
-            run_for_format(&pdfium, &root, &model_path, labels.clone(), OutputFormat::JpegXl);
-        }
-        Err(e) => {
-            println!(
-                "SKIP: OutputFormat::JpegXl case - `cjxl` not available ({e}). \
-Install via `brew install jpeg-xl` to include this case."
-            );
-        }
     }
 }

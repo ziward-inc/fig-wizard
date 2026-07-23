@@ -150,20 +150,9 @@ impl DetectedObject {
 /// this app used to always export both WebP and AVIF (4 files/object); now
 /// the user picks one format and gets 2 files/object (with/without caption).
 ///
-/// JPEG XL (`OutputFormat::JpegXl`) IS shipped, but not via a linked-in Rust
-/// encoder crate: the user-specified `jxl-rs` turned out to be decode-only,
-/// and the alternative `jpegxl-rs` (real bindings to libjxl) carries a
-/// GPL-3.0-or-later license on the bindings themselves, which would make a
-/// *distributed* build of this app subject to that copyleft even though
-/// libjxl itself is BSD-3-Clause. Instead, `pipeline::export::encode_jpegxl`
-/// shells out to libjxl's own `cjxl` command-line encoder as a subprocess
-/// (the same established pattern this codebase already uses for the
-/// optional Codex crop-verification feature - see `verify::run_codex_verify`
-/// / `verify::run_with_timeout`), so no GPL-licensed code is ever linked
-/// into the binary: `cjxl` is invoked as an external process, not a
-/// dependency. This does mean JPEG XL requires `cjxl` to be installed
-/// separately (`brew install jpeg-xl`) - see `export::cjxl_available` and
-/// README.md's "JPEG XL: shipped via `cjxl` subprocess" section.
+/// JPEG XL (`OutputFormat::JpegXl`) is encoded by the reference libjxl
+/// implementation statically linked through permissively licensed Rust
+/// bindings. It therefore has no external `cjxl` or Homebrew dependency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {

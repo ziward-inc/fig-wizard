@@ -23,7 +23,6 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::detect::DEFAULT_SCORE_THRESH;
 use crate::pdf::render::{init_pdfium, ClipRenderBudget};
-use crate::pipeline::export::cjxl_available;
 use crate::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
 use crate::pipeline::types::{Manifest, OutputFormat};
 use crate::verify;
@@ -93,36 +92,14 @@ pub struct CodexStatus {
     pub detail: String,
 }
 
-/// Checks whether the `codex` CLI is callable at all (on `PATH`, runs
-/// `codex --version` successfully) so the frontend can show a helpful
-/// message up front when the user enables the "verify with Codex"
-/// checkbox, rather than only discovering it's missing after the model
-/// download / PDF selection dance.
+/// Checks whether the `codex` CLI can be resolved and runs `codex --version`
+/// so the frontend can show a helpful message up front when the user enables
+/// the "verify with Codex" checkbox.
 #[tauri::command]
 pub fn codex_status() -> CodexStatus {
     match verify::codex_available() {
         Ok(version) => CodexStatus { available: true, detail: version },
         Err(e) => CodexStatus { available: false, detail: e },
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct CjxlStatus {
-    pub available: bool,
-    pub detail: String,
-}
-
-/// Checks whether the `cjxl` CLI (libjxl's JPEG XL encoder, installed via
-/// `brew install jpeg-xl`) is callable at all, exactly mirroring
-/// `codex_status` above, so the frontend can enable/disable the "JPEG XL"
-/// format radio and show a helpful message rather than only discovering
-/// it's missing once an extraction run with that format selected fails
-/// partway through.
-#[tauri::command]
-pub fn cjxl_status() -> CjxlStatus {
-    match cjxl_available() {
-        Ok(version) => CjxlStatus { available: true, detail: version },
-        Err(e) => CjxlStatus { available: false, detail: e },
     }
 }
 
@@ -313,17 +290,6 @@ pub async fn run_extraction(
             format!(
                 "Codex verification was requested, but the `codex` CLI isn't available: {e}. \
 Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
-            )
-        })?;
-    }
-
-    // Same preflight pattern for the JPEG XL format: fail fast with a clear
-    // message rather than partway through a long extraction run.
-    if output_format == OutputFormat::JpegXl {
-        cjxl_available().map_err(|e| {
-            format!(
-                "JPEG XL output was selected, but the `cjxl` CLI isn't available: {e}. \
-Install it with `brew install jpeg-xl`, or choose a different output format."
             )
         })?;
     }

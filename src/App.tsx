@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button"
 import { dirName, pdfStem } from "@/lib/format"
 import {
   cancelExtraction,
-  cjxlStatus,
   codexStatus,
   downloadModel,
   listResults,
@@ -24,7 +23,6 @@ import {
   runExtraction,
 } from "@/lib/tauri-commands"
 import type {
-  CjxlStatus,
   ExtractionCompletePayload,
   ExtractionErrorPayload,
   Manifest,
@@ -48,7 +46,6 @@ export function App() {
     useState<ModelDownloadProgressPayload | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  const [cjxl, setCjxl] = useState<CjxlStatus | null>(null)
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("webp")
 
   const [verifyChecked, setVerifyChecked] = useState(false)
@@ -93,31 +90,9 @@ export function App() {
     }
   }, [])
 
-  const refreshCjxlStatus = useCallback(async () => {
-    try {
-      setCjxl(await cjxlStatus())
-    } catch (e) {
-      setCjxl({ available: false, detail: String(e) })
-    }
-  }, [])
-
   useEffect(() => {
     refreshModelStatus()
-    refreshCjxlStatus()
-  }, [refreshModelStatus, refreshCjxlStatus])
-
-  // Auto-deselect the jpegxl radio back to webp whenever it becomes
-  // unavailable (cjxl missing) or busy, mirroring the original gating.
-  const jpegxlDisabled = currentJobId !== null || cjxl?.available !== true
-  useEffect(() => {
-    if (jpegxlDisabled && outputFormat === "jpegxl") setOutputFormat("webp")
-  }, [jpegxlDisabled, outputFormat])
-
-  const jpegxlTooltip = !cjxl
-    ? "Checking for the cjxl CLI…"
-    : cjxl.available
-      ? `cjxl CLI found (${cjxl.detail}).`
-      : `cjxl CLI not available: ${cjxl.detail}. Install libjxl with \`brew install jpeg-xl\` to enable this format.`
+  }, [refreshModelStatus])
 
   const loadPdf = useCallback(
     async (path: string) => {
@@ -358,8 +333,6 @@ export function App() {
             value={outputFormat}
             onValueChange={setOutputFormat}
             busy={busy}
-            jpegxlDisabled={jpegxlDisabled}
-            jpegxlTooltip={jpegxlTooltip}
           />
         </CardContent>
       </Card>
