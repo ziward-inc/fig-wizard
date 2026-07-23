@@ -21,7 +21,7 @@ pub const DETECTION_DPI: f32 = 200.0;
 
 /// Safety margin added to every side of a bbox returned by the detection
 /// model. The ratio is relative to the bbox's width or height respectively.
-const DETECTION_BBOX_MARGIN_RATIO: f32 = 0.02;
+const DETECTION_BBOX_MARGIN_RATIO: f32 = 0.05;
 
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
