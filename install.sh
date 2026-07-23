@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# FigWizard installer: downloads the latest GitHub release's .dmg and
-# installs FigWizard.app into /Applications.
+# FigWizard installer: downloads the latest GitHub release's .dmg,
+# installs FigWizard.app into /Applications, and launches it.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/ziward-inc/fig-wizard/main/install.sh | bash
@@ -119,6 +119,8 @@ MOUNT_POINT=""
 # GUI download managers set it), but this is a no-op if it's already absent.
 xattr -cr "/Applications/$APP_BASENAME"
 
+echo "==> Launching $APP_BASENAME..."
+open "/Applications/$APP_BASENAME"
+
 echo ""
-echo "FigWizard ($TAG) installed to /Applications/$APP_BASENAME"
-echo "Launch it from Spotlight/Launchpad, or: open \"/Applications/$APP_BASENAME\""
+echo "FigWizard ($TAG) installed and launched from /Applications/$APP_BASENAME"

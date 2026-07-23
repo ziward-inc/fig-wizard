@@ -67,9 +67,7 @@ is compiled out of release builds.
 
 ## Installing via the one-line script
 
-`install.sh` (at the repo root) looks up the latest GitHub release, downloads its `.dmg`,
-and installs `FigWizard.app` into `/Applications` - no `git clone`, Xcode, or Rust
-toolchain needed:
+`install.sh` (at the repo root) looks up the latest GitHub release, downloads its `.dmg`, installs `FigWizard.app` into `/Applications`, and launches it - no `git clone`, Xcode, or Rust toolchain needed:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ziward-inc/fig-wizard/main/install.sh | bash
