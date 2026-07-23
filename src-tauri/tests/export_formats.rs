@@ -16,7 +16,7 @@ use figwizard_lib::pdf::render::{init_pdfium, ClipRenderBudget};
 use figwizard_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
 use figwizard_lib::pipeline::types::OutputFormat;
 use pdfium_render::prelude::Pdfium;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 fn repo_root() -> PathBuf {
@@ -89,7 +89,7 @@ fn assert_valid_magic_bytes(format: OutputFormat, data: &[u8]) {
 /// (which `cargo test` would otherwise run as parallel threads in the same
 /// process and hit `PdfiumLibraryBindingsAlreadyInitialized` on all but the
 /// first).
-fn run_for_format(pdfium: &Pdfium, root: &PathBuf, model_path: &PathBuf, labels: Vec<String>, format: OutputFormat) {
+fn run_for_format(pdfium: &Pdfium, root: &Path, model_path: &PathBuf, labels: Vec<String>, format: OutputFormat) {
     let pdf_path = root.join("src-tauri/tests/fixtures/ppo_mini.pdf");
     let output_dir = root
         .join("src-tauri/tests/output/export_formats_run")
