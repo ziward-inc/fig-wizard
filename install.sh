@@ -112,7 +112,7 @@ cp -R "$APP_PATH" "/Applications/$APP_BASENAME"
 hdiutil detach "$MOUNT_POINT" -quiet
 MOUNT_POINT=""
 
-# This build is ad-hoc signed only, not notarized (see app/README.md's
+# This build is ad-hoc signed only, not notarized (see README.md's
 # "Notarization status") - strip any quarantine attribute defensively so
 # Gatekeeper doesn't block the first launch. curl/wget downloads typically
 # don't get the com.apple.quarantine xattr in the first place (only
