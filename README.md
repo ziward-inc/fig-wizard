@@ -84,6 +84,55 @@ macOS, if `jq` isn't installed) to parse the GitHub API response. Like the `.dmg
 itself, the installed app is ad-hoc signed only, not notarized - see "Notarization status"
 below.
 
+## Releasing a new version
+
+Run these commands from the repository root on a clean `main` branch. Choose a new, unused patch/minor/major version and replace `0.2.7` below. This project currently publishes an arm64 macOS DMG.
+
+```sh
+VERSION=0.2.7
+
+perl -0pi -e 's/"version": "[^"]+"/"version": "'"$VERSION"'"/' package.json
+perl -0pi -e 's/^version = "[^"]+"/version = "'"$VERSION"'"/m' src-tauri/Cargo.toml
+perl -0pi -e 's/"version": "[^"]+"/"version": "'"$VERSION"'"/' src-tauri/tauri.conf.json
+cargo check --manifest-path src-tauri/Cargo.toml
+
+pnpm lint
+pnpm typecheck
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+pnpm tauri build
+```
+
+Verify the generated artifact before publishing:
+
+```sh
+DMG="src-tauri/target/release/bundle/dmg/FigWizard_${VERSION}_aarch64.dmg"
+MOUNT="$(mktemp -d /tmp/figwizard-release-XXXXXX)"
+hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG"
+plutil -extract CFBundleShortVersionString raw "$MOUNT/FigWizard.app/Contents/Info.plist"
+file "$MOUNT/FigWizard.app/Contents/MacOS/figwizard"
+codesign -dv --verbose=4 "$MOUNT/FigWizard.app"
+hdiutil detach "$MOUNT"
+rmdir "$MOUNT"
+shasum -a 256 "$DMG"
+stat -f '%z' "$DMG"
+```
+
+Commit the exact source used to build the DMG, then push the tag and publish the asset:
+
+```sh
+git status --short
+git diff --check
+git ls-remote --tags origin "refs/tags/v${VERSION}"
+git add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json
+git commit -m "Release v${VERSION}"
+git push origin main
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
+gh release create "v${VERSION}" "$DMG" --verify-tag --latest --title "FigWizard v${VERSION}" --generate-notes
+```
+
+The release build is ad-hoc signed and not notarized; see the status and Gatekeeper guidance below before distributing it.
+
 ## Installing via `cargo install`
 
 As an alternative to the `.dmg` release, the one-line script above, or running from source
