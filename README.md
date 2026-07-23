@@ -239,11 +239,7 @@ schema, whether the crop is a clean, complete, standalone image of that object:
 Finder-launched macOS apps do not inherit the same `PATH` as a terminal. FigWizard therefore resolves Codex from both `PATH` and common per-user install locations such as `~/.local/bin` and `~/.npm-global/bin`. For npm installs, it launches the platform-native Codex binary inside the package instead of the JavaScript wrapper, so the wrapper's `#!/usr/bin/env node` does not introduce the same `PATH` failure again.
 
 - If Codex says the crop passes, it's exported as-is.
-- If Codex flags an issue (cut off on some side, or including too much irrelevant extra
-  content on some side), it also returns a suggested bounding-box correction in PDF points.
-  The app applies that correction (capped and clamped to sane bounds), re-renders, and
-  re-verifies - **up to 3 total attempts per object** (1 initial check + up to 2 corrective
-  re-renders; see `MAX_ATTEMPTS` in `src-tauri/src/verify/mod.rs` if you want to tune it).
+- If Codex flags an issue (cut off on some side, or including too much irrelevant extra content on some side), it also returns a suggested bounding-box correction in PDF points. For expansion-only feedback, the app adds a safety margin equal to 2% of the current bbox dimension on every side (width for left/right, height for top/bottom). Shrink-only or mixed expand/shrink feedback is applied exactly as suggested. The result is capped and clamped to sane bounds, re-rendered, and re-verified - **up to 3 total attempts per object** (1 initial check + up to 2 corrective re-renders; see `MAX_ATTEMPTS` in `src-tauri/src/verify/mod.rs` if you want to tune it).
 - One verification pass runs per object, against its own (no-caption) bounding box; the
   corrected box is then reused for both the no-caption crop and the with-caption crop
   (re-unioned with the original caption box) - the with-caption variant is not verified

@@ -66,6 +66,11 @@ const CODEX_TIMEOUT_SECS: u64 = 90;
 /// suggestion blowing up the crop.
 const MAX_ADJUSTMENT_PT: f32 = 200.0;
 
+/// Fraction of the current bbox dimension added to every side when Codex
+/// only asks to expand (or returns a failed verdict with a zero adjustment).
+/// Any adjustment that includes a shrink is applied exactly as suggested.
+const EXPANSION_MARGIN_RATIO: f32 = 0.02;
+
 /// Floor (in PDF points) under which we refuse to let width/height shrink,
 /// guarding against a shrink-adjustment collapsing or inverting the box.
 const MIN_DIM_PT: f32 = 5.0;
@@ -402,20 +407,29 @@ y-coordinates). If passed=true, set all four bbox_adjustment_pt values to 0 and 
     )
 }
 
-/// Applies a Codex-suggested adjustment to `bbox`, capping each side's
-/// magnitude at `MAX_ADJUSTMENT_PT`, clamping the result to stay within the
-/// page, and enforcing `MIN_DIM_PT` as a floor on both dimensions so a
-/// shrink adjustment can never collapse or invert the box.
+/// Applies a Codex-suggested adjustment to `bbox`. Expansion-only feedback
+/// gets `EXPANSION_MARGIN_RATIO` of the current width added on the left and
+/// right, and the same ratio of the current height on the top and bottom.
+/// Shrink-only and mixed expand/shrink feedback are applied without that
+/// margin. Each side is then capped at `MAX_ADJUSTMENT_PT`, the result is
+/// clamped to the page, and `MIN_DIM_PT` is enforced as a floor on both
+/// dimensions so a shrink adjustment can never collapse or invert the box.
 ///
 /// See the module doc comment for the sign convention this implements:
 /// visual top/bottom map to the box's `y1`/`y0` respectively (PDF point
 /// space is y-up), and visual left/right map directly to `x0`/`x1`.
 fn apply_adjustment(bbox: BBoxPt, adj: &BboxAdjustment, page_width_pt: f32, page_height_pt: f32) -> BBoxPt {
     let cap = MAX_ADJUSTMENT_PT;
-    let left = adj.left.clamp(-cap, cap);
-    let right = adj.right.clamp(-cap, cap);
-    let top = adj.top.clamp(-cap, cap);
-    let bottom = adj.bottom.clamp(-cap, cap);
+    let (horizontal_margin, vertical_margin) =
+        if adj.top >= 0.0 && adj.bottom >= 0.0 && adj.left >= 0.0 && adj.right >= 0.0 {
+            (bbox.width() * EXPANSION_MARGIN_RATIO, bbox.height() * EXPANSION_MARGIN_RATIO)
+        } else {
+            (0.0, 0.0)
+        };
+    let left = (adj.left + horizontal_margin).clamp(-cap, cap);
+    let right = (adj.right + horizontal_margin).clamp(-cap, cap);
+    let top = (adj.top + vertical_margin).clamp(-cap, cap);
+    let bottom = (adj.bottom + vertical_margin).clamp(-cap, cap);
 
     let mut x0 = (bbox.x0 - left).max(0.0);
     let mut x1 = (bbox.x1 + right).min(page_width_pt);
@@ -572,13 +586,13 @@ mod tests {
     }
 
     #[test]
-    fn zero_adjustment_is_identity() {
+    fn zero_non_shrink_adjustment_expands_every_side_by_ratio() {
         let b = bbox(100.0, 100.0, 200.0, 300.0);
         let out = apply_adjustment(b, &no_adjust(), 1000.0, 1000.0);
-        assert!((out.x0 - b.x0).abs() < 1e-3);
-        assert!((out.y0 - b.y0).abs() < 1e-3);
-        assert!((out.x1 - b.x1).abs() < 1e-3);
-        assert!((out.y1 - b.y1).abs() < 1e-3);
+        assert!((out.x0 - 98.0).abs() < 1e-3);
+        assert!((out.y0 - 96.0).abs() < 1e-3);
+        assert!((out.x1 - 202.0).abs() < 1e-3);
+        assert!((out.y1 - 304.0).abs() < 1e-3);
     }
 
     /// Positive "top" must EXPAND upward, which in this codebase's y-up
@@ -589,8 +603,10 @@ mod tests {
         let b = bbox(100.0, 100.0, 200.0, 300.0);
         let adj = BboxAdjustment { top: 20.0, bottom: 0.0, left: 0.0, right: 0.0 };
         let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
-        assert!((out.y1 - 320.0).abs() < 1e-3, "expected y1=320, got {}", out.y1);
-        assert!((out.y0 - b.y0).abs() < 1e-3, "y0 should be untouched");
+        assert!((out.y1 - 324.0).abs() < 1e-3, "expected y1=324, got {}", out.y1);
+        assert!((out.y0 - 96.0).abs() < 1e-3, "expected y0=96, got {}", out.y0);
+        assert!((out.x0 - 98.0).abs() < 1e-3, "expected x0=98, got {}", out.x0);
+        assert!((out.x1 - 202.0).abs() < 1e-3, "expected x1=202, got {}", out.x1);
     }
 
     /// Positive "bottom" must EXPAND downward, i.e. DECREASING y0.
@@ -599,8 +615,8 @@ mod tests {
         let b = bbox(100.0, 100.0, 200.0, 300.0);
         let adj = BboxAdjustment { top: 0.0, bottom: 20.0, left: 0.0, right: 0.0 };
         let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
-        assert!((out.y0 - 80.0).abs() < 1e-3, "expected y0=80, got {}", out.y0);
-        assert!((out.y1 - b.y1).abs() < 1e-3, "y1 should be untouched");
+        assert!((out.y0 - 76.0).abs() < 1e-3, "expected y0=76, got {}", out.y0);
+        assert!((out.y1 - 304.0).abs() < 1e-3, "expected y1=304, got {}", out.y1);
     }
 
     /// Positive "left" must EXPAND leftward, i.e. DECREASING x0.
@@ -609,7 +625,8 @@ mod tests {
         let b = bbox(100.0, 100.0, 200.0, 300.0);
         let adj = BboxAdjustment { top: 0.0, bottom: 0.0, left: 15.0, right: 0.0 };
         let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
-        assert!((out.x0 - 85.0).abs() < 1e-3, "expected x0=85, got {}", out.x0);
+        assert!((out.x0 - 83.0).abs() < 1e-3, "expected x0=83, got {}", out.x0);
+        assert!((out.x1 - 202.0).abs() < 1e-3, "expected x1=202, got {}", out.x1);
     }
 
     /// Positive "right" must EXPAND rightward, i.e. INCREASING x1.
@@ -618,7 +635,8 @@ mod tests {
         let b = bbox(100.0, 100.0, 200.0, 300.0);
         let adj = BboxAdjustment { top: 0.0, bottom: 0.0, left: 0.0, right: 15.0 };
         let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
-        assert!((out.x1 - 215.0).abs() < 1e-3, "expected x1=215, got {}", out.x1);
+        assert!((out.x1 - 217.0).abs() < 1e-3, "expected x1=217, got {}", out.x1);
+        assert!((out.x0 - 98.0).abs() < 1e-3, "expected x0=98, got {}", out.x0);
     }
 
     /// Negative values SHRINK inward: negative "top" must DECREASE y1,
@@ -631,6 +649,28 @@ mod tests {
         assert!((out.y1 - 280.0).abs() < 1e-3, "expected y1=280, got {}", out.y1);
         assert!((out.y0 - 110.0).abs() < 1e-3, "expected y0=110, got {}", out.y0);
         assert!((out.x0 - 105.0).abs() < 1e-3, "expected x0=105, got {}", out.x0);
+        assert!((out.x1 - 195.0).abs() < 1e-3, "expected x1=195, got {}", out.x1);
+    }
+
+    #[test]
+    fn single_side_shrink_does_not_expand_other_sides() {
+        let b = bbox(100.0, 100.0, 200.0, 300.0);
+        let adj = BboxAdjustment { top: -20.0, bottom: 0.0, left: 0.0, right: 0.0 };
+        let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
+        assert!((out.y1 - 280.0).abs() < 1e-3, "expected y1=280, got {}", out.y1);
+        assert!((out.y0 - b.y0).abs() < 1e-3, "y0 should be untouched");
+        assert!((out.x0 - b.x0).abs() < 1e-3, "x0 should be untouched");
+        assert!((out.x1 - b.x1).abs() < 1e-3, "x1 should be untouched");
+    }
+
+    #[test]
+    fn mixed_expand_and_shrink_feedback_is_applied_exactly() {
+        let b = bbox(100.0, 100.0, 200.0, 300.0);
+        let adj = BboxAdjustment { top: 20.0, bottom: -10.0, left: 15.0, right: -5.0 };
+        let out = apply_adjustment(b, &adj, 1000.0, 1000.0);
+        assert!((out.y1 - 320.0).abs() < 1e-3, "expected y1=320, got {}", out.y1);
+        assert!((out.y0 - 110.0).abs() < 1e-3, "expected y0=110, got {}", out.y0);
+        assert!((out.x0 - 85.0).abs() < 1e-3, "expected x0=85, got {}", out.x0);
         assert!((out.x1 - 195.0).abs() < 1e-3, "expected x1=195, got {}", out.x1);
     }
 
