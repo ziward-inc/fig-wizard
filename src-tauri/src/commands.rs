@@ -53,13 +53,13 @@ pub struct AppState {
 /// Returns the shared `Pdfium` instance, initializing it on first use.
 /// Failures (e.g. library not downloaded yet) are never cached - the next
 /// call will simply try `init_pdfium` again once assets are available.
-fn take_pdfium(app: &AppHandle, state: &AppState) -> Result<Pdfium, String> {
+fn take_pdfium(state: &AppState) -> Result<Pdfium, String> {
     let mut guard = state.pdfium.lock().unwrap();
     if let Some(p) = guard.take() {
         return Ok(p);
     }
     drop(guard);
-    let dir = resolve_pdfium_dir(app)?;
+    let dir = resolve_pdfium_dir()?;
     init_pdfium(&dir).map_err(|e| format!("Failed to init PDFium: {e:#}"))
 }
 
@@ -105,15 +105,18 @@ fn app_data_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .join("models"))
 }
 
-fn bundled_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .executable_dir()
-        .map_err(|e| format!("resolving app executable directory: {e}"))?
+fn bundled_pdfium_dir() -> Result<PathBuf, String> {
+    let executable = std::env::current_exe()
+        .map_err(|e| format!("resolving app executable path: {e}"))?;
+    frameworks_dir_for_executable(&executable)
+        .ok_or_else(|| format!("resolving app Frameworks directory from {executable:?}"))
+}
+
+fn frameworks_dir_for_executable(executable: &Path) -> Option<PathBuf> {
+    executable
         .parent()
-        .ok_or_else(|| "resolving app Frameworks directory".to_string())?
-        .join("Frameworks")
-        .to_path_buf())
+        .and_then(Path::parent)
+        .map(|contents_dir| contents_dir.join("Frameworks"))
 }
 
 /// Dev-only fallback: `src-tauri/models` next to this crate's `Cargo.toml`.
@@ -138,8 +141,8 @@ fn pdfium_ready(dir: &Path) -> bool {
     dir.join(PDFIUM_DYLIB_NAME).is_file()
 }
 
-fn resolve_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Ok(bundled) = bundled_pdfium_dir(app) {
+fn resolve_pdfium_dir() -> Result<PathBuf, String> {
+    if let Ok(bundled) = bundled_pdfium_dir() {
         if pdfium_ready(&bundled) {
             return Ok(bundled);
         }
@@ -182,7 +185,7 @@ fn resolve_model_and_labels(app: &AppHandle) -> Result<(PathBuf, Vec<String>), S
 /// briefly opening it with PDFium. Uses the shared `Pdfium` instance from
 /// `AppState` (see its doc comment) rather than re-binding the library.
 #[tauri::command]
-pub fn open_pdf(app: AppHandle, state: tauri::State<'_, AppState>, path: String) -> Result<PdfInfo, String> {
+pub fn open_pdf(state: tauri::State<'_, AppState>, path: String) -> Result<PdfInfo, String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return Err(format!("File not found: {path}"));
@@ -196,7 +199,7 @@ pub fn open_pdf(app: AppHandle, state: tauri::State<'_, AppState>, path: String)
         return Err("Selected file is not a .pdf".to_string());
     }
 
-    let pdfium = take_pdfium(&app, &state)?;
+    let pdfium = take_pdfium(&state)?;
     let result = pdfium
         .load_pdf_from_file(&p, None)
         .map(|doc| doc.pages().len() as u32)
@@ -234,7 +237,7 @@ pub async fn pick_output_dir(app: AppHandle) -> Result<Option<String>, String> {
 pub fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
     let prod_models = app_data_models_dir(&app)?;
     let prod_model_ok = model_ready(&prod_models);
-    let bundled_pdfium_ok = bundled_pdfium_dir(&app)
+    let bundled_pdfium_ok = bundled_pdfium_dir()
         .map(|dir| pdfium_ready(&dir))
         .unwrap_or(false);
 
@@ -292,7 +295,7 @@ Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
         })?;
     }
 
-    let pdfium = take_pdfium(&app, &state)?;
+    let pdfium = take_pdfium(&state)?;
 
     let job_id = uuid::Uuid::new_v4().to_string();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -506,4 +509,20 @@ async fn download_file_with_progress(
     file.flush().await.map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frameworks_dir_for_executable;
+    use std::path::Path;
+
+    #[test]
+    fn finds_frameworks_next_to_a_macos_app_executable() {
+        assert_eq!(
+            frameworks_dir_for_executable(Path::new(
+                "/Applications/FigWizard.app/Contents/MacOS/figwizard",
+            )),
+            Some(Path::new("/Applications/FigWizard.app/Contents/Frameworks").to_path_buf())
+        );
+    }
 }
