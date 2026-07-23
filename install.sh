@@ -76,6 +76,29 @@ fi
 
 echo "==> Found $ASSET_NAME ($TAG)"
 
+INSTALLED_INFO="/Applications/FigWizard.app/Contents/Info.plist"
+if [[ -f "$INSTALLED_INFO" ]]; then
+  INSTALLED_VERSION="$(plutil -extract CFBundleShortVersionString raw "$INSTALLED_INFO" 2>/dev/null || true)"
+  if [[ -n "$INSTALLED_VERSION" && "$INSTALLED_VERSION" == "${TAG#v}" ]]; then
+    if [[ ! -t 1 ]]; then
+      echo "error: FigWizard $TAG is already installed. Re-run from an interactive terminal to confirm overwrite." >&2
+      exit 1
+    fi
+
+    printf "FigWizard %s is already installed. Overwrite and reinstall? [y/N] " "$TAG" >/dev/tty
+    IFS= read -r OVERWRITE_REPLY </dev/tty
+    case "$OVERWRITE_REPLY" in
+      [yY] | [yY][eE][sS])
+        echo "==> Reinstalling FigWizard $TAG..."
+        ;;
+      *)
+        echo "==> Installation cancelled."
+        exit 0
+        ;;
+    esac
+  fi
+fi
+
 WORKDIR=""
 MOUNT_POINT=""
 cleanup() {

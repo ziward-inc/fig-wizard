@@ -69,6 +69,8 @@ is compiled out of release builds.
 
 `install.sh` (at the repo root) looks up the latest GitHub release, downloads its `.dmg`, installs `FigWizard.app` into `/Applications`, and launches it - no `git clone`, Xcode, or Rust toolchain needed:
 
+If the installed app is already the latest version, the installer asks before downloading and overwriting it. Enter `y` or `yes` to reinstall; pressing Enter or answering `n` leaves the existing installation unchanged. A non-interactive run stops safely because it cannot obtain overwrite confirmation.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ziward-inc/fig-wizard/main/install.sh | bash
 ```
