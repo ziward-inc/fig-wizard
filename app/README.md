@@ -15,13 +15,43 @@ pnpm tauri dev
 ### Frontend stack
 
 The UI (`app/src`) is a Vite + React + TypeScript app using [shadcn/ui](https://ui.shadcn.com)
-components (on top of `@base-ui/react` primitives, per this project's `components.json`) and
-Tailwind v4. It talks to the Rust side via `@tauri-apps/api` (`core`/`event`/`webview`) rather
-than the `window.__TAURI__` global - `tauri.conf.json` sets `app.withGlobalTauri: false`
-accordingly. The UI font is [SUITE Variable](https://github.com/sun-typeface/SUITE), vendored
-locally at `app/public/fonts/SUITE-Variable.woff2` (not loaded from a CDN, so the app doesn't
-need network access to render its own chrome) and wired in as `--font-sans` in `src/index.css`;
+components (on top of `@base-ui/react` primitives, not Radix - per this project's
+`components.json`, from the `beXRTXBi` preset) and Tailwind v4. It talks to the Rust side via
+`@tauri-apps/api` (`core`/`event`/`webview`) rather than the `window.__TAURI__` global -
+`tauri.conf.json` sets `app.withGlobalTauri: false` accordingly. The UI font is
+[SUITE Variable](https://github.com/sun-typeface/SUITE), vendored locally at
+`app/public/fonts/SUITE-Variable.woff2` (not loaded from a CDN, so the app doesn't need
+network access to render its own chrome) and wired in as `--font-sans` in `src/index.css`;
 Geist Mono remains `--font-mono` for the monospace bits (file paths, etc).
+
+Layout of `app/src`:
+
+- `App.tsx` - top-level state (current PDF, output dir/format, job/progress state,
+  results manifest) and the Tauri event-listener wiring; composes the section components
+  below into the four numbered cards plus the results gallery.
+- `components/app/` - the app's own feature components (`ModelBanner`, `PdfDropZone`,
+  `FormatPicker`, `VerifySection`, `ExtractSection`, `ResultsGallery`, `ObjectDialog`,
+  `VerificationBadge`/`VerificationHistory`, `ImageWithFallback`). Each corresponds
+  1:1 to a section/behavior of the original vanilla-JS UI.
+- `components/ui/` - shadcn-generated primitives (button, card, dialog, etc.) - treat
+  these as generated code; re-run `pnpm dlx shadcn@latest add <name>` from `app/` to
+  add more or `--overwrite` to regenerate rather than hand-editing them.
+- `lib/tauri-types.ts` - TypeScript mirrors of the Rust types in `src-tauri/src/commands.rs`
+  / `src-tauri/src/pipeline/types.rs`. Note the casing split: pipeline events
+  (`page-detected`, `object-exported`, etc.) are hand-built with `serde_json::json!` and
+  use **camelCase** keys (`jobId`, `pageIndex`, ...), while `manifest.json` / command
+  return values use serde's default **snake_case** (`page_index`, `has_caption`, ...).
+  This is intentional on the Rust side, not a typo - keep it in mind when adding fields.
+- `lib/tauri-commands.ts` - thin typed wrappers around `invoke("command_name", ...)` for
+  every `#[tauri::command]` in `commands.rs`.
+- `lib/format.ts` - small pure helpers (`pdfStem`, `dirName`, `formatBytes`, `formatLabel`).
+
+Because `App.tsx` sets up the `listen()` calls once on mount, but needs the *current*
+`currentJobId`/`currentPdf`/`currentOutputDir` inside those long-lived callbacks (to filter
+events by job id, or to call `list_results` after `extraction-complete`), those three
+pieces of state are mirrored into refs (`currentJobIdRef` etc.) that are updated in lockstep
+with the corresponding `useState` setters, rather than read directly from the closed-over
+state.
 
 To add more shadcn components: `pnpm dlx shadcn@latest add <name>` from `app/`.
 
