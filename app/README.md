@@ -70,11 +70,31 @@ already checked out at `src-tauri/models/` and `src-tauri/binaries/pdfium/` if p
 contributors who already have those don't need to re-download anything. That fallback path
 is compiled out of release builds.
 
+## Installing via the one-line script
+
+`install.sh` (at the repo root) looks up the latest GitHub release, downloads its `.dmg`,
+and installs `FigWizard.app` into `/Applications` - no `git clone`, Xcode, or Rust
+toolchain needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ziward-inc/fig-wizard/main/install.sh | bash
+```
+
+```sh
+wget -qO- https://raw.githubusercontent.com/ziward-inc/fig-wizard/main/install.sh | bash
+```
+
+It requires only `curl` or `wget`, plus `jq` (falls back to `python3`, which ships with
+macOS, if `jq` isn't installed) to parse the GitHub API response. Like the `.dmg` release
+itself, the installed app is ad-hoc signed only, not notarized - see "Notarization status"
+below.
+
 ## Installing via `cargo install`
 
-As an alternative to the `.dmg` release or running from source with `pnpm tauri dev`,
-the app can be installed as a plain binary via Cargo (confirmed working: `cargo install
---path app/src-tauri --locked` successfully builds and installs a `figwizard` binary):
+As an alternative to the `.dmg` release, the one-line script above, or running from source
+with `pnpm tauri dev`, the app can be installed as a plain binary via Cargo (confirmed
+working: `cargo install --path app/src-tauri --locked` successfully builds and installs a
+`figwizard` binary):
 
 ```sh
 git clone https://github.com/ziward-inc/fig-wizard.git
