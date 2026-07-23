@@ -25,9 +25,6 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
-    "resources": {
-      "binaries/pdfium/lib/libpdfium.dylib": "pdfium/lib/libpdfium.dylib"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,7 +34,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "15.0",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "frameworks": ["binaries/pdfium/lib/libpdfium.dylib"]
     }
   }
 }

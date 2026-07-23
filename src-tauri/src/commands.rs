@@ -108,10 +108,12 @@ fn app_data_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
 fn bundled_pdfium_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
-        .resource_dir()
-        .map_err(|e| format!("resolving app resource directory: {e}"))?
-        .join("pdfium")
-        .join("lib"))
+        .executable_dir()
+        .map_err(|e| format!("resolving app executable directory: {e}"))?
+        .parent()
+        .ok_or_else(|| "resolving app Frameworks directory".to_string())?
+        .join("Frameworks")
+        .to_path_buf())
 }
 
 /// Dev-only fallback: `src-tauri/models` next to this crate's `Cargo.toml`.
