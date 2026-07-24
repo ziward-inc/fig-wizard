@@ -67,8 +67,12 @@ stat -f '%z' "$DMG"
 
 git diff --check
 git add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json
-git commit -m "Release ${TAG}"
-git push origin main
+if ! git diff --cached --quiet; then
+  git commit -m "Release ${TAG}"
+  git push origin main
+else
+  echo "Version files already at ${VERSION}; skipping release commit"
+fi
 git tag "${TAG}"
 git push origin "${TAG}"
 gh release create "${TAG}" "$DMG" --verify-tag --latest --title "FigWizard ${TAG}" --generate-notes
