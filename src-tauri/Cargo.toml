@@ -3,7 +3,7 @@ name = "figwizard"
 version = "0.3.5"
 license = "Apache-2.0"
 description = "Extracts figures, tables, formulas, and algorithm blocks from academic paper PDFs as near-4K images"
-authors = ["Sungdon Kim"]
+authors = ["Ziward, Inc."]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
