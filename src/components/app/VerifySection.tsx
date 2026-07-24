@@ -39,9 +39,9 @@ export function VerifySection({
         <p className="mt-2 mb-2 text-sm text-muted-foreground">
           Uses the <code>{value}</code> CLI to double-check each crop and
           correct it if it's cut off or includes too much extra content,
-          retrying up to 3 times per object. Requires network access and adds
-          an AI call per object on top of the existing (already CPU/time-
-          heavy) extraction pipeline.
+          retrying up to 3 times per object. Requires network access and adds an
+          AI call per object on top of the existing (already CPU/time- heavy)
+          extraction pipeline.
         </p>
       )}
       {value !== "off" && statusLine && (

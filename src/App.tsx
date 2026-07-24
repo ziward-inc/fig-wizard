@@ -57,9 +57,7 @@ export function App() {
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("webp")
 
   const [verifyBackend, setVerifyBackend] = useState<VerifyBackend>("off")
-  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(
-    null
-  )
+  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null)
   const [backendStatusLine, setBackendStatusLine] = useState<string | null>(
     null
   )
