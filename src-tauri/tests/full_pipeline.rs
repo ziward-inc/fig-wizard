@@ -6,7 +6,7 @@
 use figwizard_lib::detect::DEFAULT_SCORE_THRESH;
 use figwizard_lib::pdf::render::{init_pdfium, ClipRenderBudget};
 use figwizard_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
-use figwizard_lib::pipeline::types::OutputFormat;
+use figwizard_lib::pipeline::types::{OutputFormat, VerifyBackend};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -54,7 +54,7 @@ fn full_pipeline_on_attention_pdf() {
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
             output_format: OutputFormat::Webp,
-            verify_with_codex: false,
+            verify_backend: VerifyBackend::Off,
         },
         &cancel,
         |event| match event {
@@ -99,24 +99,21 @@ fn full_pipeline_on_attention_pdf() {
     println!("wrote {} objects across attention.pdf", manifest.objects.len());
 }
 
-/// Dev-only, network-touching end-to-end test: runs the full pipeline
+/// Dev-only, network-touching end-to-end run: runs the full pipeline
 /// against ppo.pdf (smaller/faster than attention.pdf, algorithm-heavy)
-/// WITH the optional Codex crop-verification pass turned on, to confirm
-/// real `codex exec` calls happen, the manifest records real per-object
-/// attempt counts, and the feature never aborts the whole run even if some
-/// individual object fails to pass verification. Marked `#[ignore]` since
-/// it costs real wall-clock time and a live Codex CLI/network round-trip
-/// per object - run explicitly with
-/// `cargo test --test full_pipeline verify_with_codex_on_ppo_pdf -- --ignored --nocapture`.
-#[test]
-#[ignore]
-fn verify_with_codex_on_ppo_pdf() {
+/// WITH the optional crop-verification pass turned on for the given
+/// `backend`, to confirm real CLI calls happen, the manifest records real
+/// per-object attempt counts, and the feature never aborts the whole run
+/// even if some individual object fails to pass verification. Shared by the
+/// per-backend `#[ignore]`d tests below since the two runs are identical
+/// apart from which backend/output dir is used.
+fn run_verify_backend_on_ppo_pdf(backend: VerifyBackend, output_dir_name: &str) {
     let root = repo_root();
     let pdfium_dir = root.join("src-tauri/binaries/pdfium/lib");
     let model_path = root.join("src-tauri/models/PP-DocLayoutV3.onnx");
     let config_path = root.join("src-tauri/models/config.json");
     let pdf_path = root.join("src-tauri/tests/fixtures/ppo.pdf");
-    let output_dir = root.join("src-tauri/tests/output/ppo_verify_run");
+    let output_dir = root.join("src-tauri/tests/output").join(output_dir_name);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 
@@ -142,7 +139,7 @@ fn verify_with_codex_on_ppo_pdf() {
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
             output_format: OutputFormat::Webp,
-            verify_with_codex: true,
+            verify_backend: backend,
         },
         &cancel,
         |event| match event {
@@ -157,7 +154,7 @@ fn verify_with_codex_on_ppo_pdf() {
             }
         },
     )
-    .expect("process_pdf with verify_with_codex failed");
+    .expect("process_pdf with verification enabled failed");
 
     assert!(!manifest.objects.is_empty(), "expected at least one object on ppo.pdf");
 
@@ -191,4 +188,26 @@ fn verify_with_codex_on_ppo_pdf() {
             );
         }
     }
+}
+
+/// Run explicitly with
+/// `cargo test --test full_pipeline verify_with_codex_on_ppo_pdf -- --ignored --nocapture`.
+/// See `run_verify_backend_on_ppo_pdf` for what this checks. Marked
+/// `#[ignore]` since it costs real wall-clock time and a live Codex
+/// CLI/network round-trip per object.
+#[test]
+#[ignore]
+fn verify_with_codex_on_ppo_pdf() {
+    run_verify_backend_on_ppo_pdf(VerifyBackend::Codex, "ppo_verify_run_codex");
+}
+
+/// Run explicitly with
+/// `cargo test --test full_pipeline verify_with_claude_on_ppo_pdf -- --ignored --nocapture`.
+/// See `run_verify_backend_on_ppo_pdf` for what this checks. Marked
+/// `#[ignore]` since it costs real wall-clock time and a live Claude Code
+/// CLI/network round-trip per object.
+#[test]
+#[ignore]
+fn verify_with_claude_on_ppo_pdf() {
+    run_verify_backend_on_ppo_pdf(VerifyBackend::Claude, "ppo_verify_run_claude");
 }

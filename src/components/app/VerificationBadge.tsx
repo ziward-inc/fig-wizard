@@ -17,7 +17,7 @@ export function VerificationBadge({
     return (
       <Badge
         className={cn("bg-emerald-100 text-emerald-800", className)}
-        title="Codex verified this crop on the first attempt."
+        title="AI verified this crop on the first attempt."
       >
         ✓ 1 try
       </Badge>
@@ -27,7 +27,7 @@ export function VerificationBadge({
     return (
       <Badge
         className={cn("bg-amber-100 text-amber-800", className)}
-        title={`Codex flagged and corrected this crop (${tries}) before it passed.`}
+        title={`AI flagged and corrected this crop (${tries}) before it passed.`}
       >
         ⟳ {tries}
       </Badge>
@@ -36,7 +36,7 @@ export function VerificationBadge({
   return (
     <Badge
       className={cn("bg-red-100 text-red-800", className)}
-      title={`Codex could not verify this crop as complete after ${tries}${
+      title={`AI could not verify this crop as complete after ${tries}${
         verification.last_issue
           ? ` (last issue: ${verification.last_issue})`
           : ""

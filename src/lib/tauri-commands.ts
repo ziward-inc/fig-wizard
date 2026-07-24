@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import type {
-  CodexStatus,
+  BackendStatus,
   Manifest,
   ModelStatus,
   OutputFormat,
   PdfInfo,
+  VerifyBackend,
 } from "@/lib/tauri-types"
 
 export const openPdf = (path: string) => invoke<PdfInfo>("open_pdf", { path })
@@ -22,7 +23,7 @@ export const runExtraction = (args: {
   pdfPath: string
   outputDir: string
   outputFormat: OutputFormat
-  verifyWithCodex: boolean
+  verifyBackend: VerifyBackend
 }) => invoke<string>("run_extraction", args)
 
 export const cancelExtraction = (jobId: string) =>
@@ -34,4 +35,5 @@ export const listResults = (args: { outputDir: string; pdfStem: string }) =>
 export const openResultDir = (path: string) =>
   invoke<void>("open_result_dir", { path })
 
-export const codexStatus = () => invoke<CodexStatus>("codex_status")
+export const backendStatus = (backend: VerifyBackend) =>
+  invoke<BackendStatus>("backend_status", { backend })

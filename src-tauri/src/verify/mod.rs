@@ -1,12 +1,15 @@
-//! Optional, off-by-default runtime crop verification: shells out to the
-//! `codex` CLI (OpenAI's coding agent, used here purely as a multimodal
-//! judge - no code editing happens) with the rendered crop image and asks
-//! it to judge whether the crop is a clean, complete, standalone image of
-//! the detected object. If not, Codex proposes a bounding-box correction
-//! (in PDF points, on the visual sides of the image); we apply it, re-render,
-//! and re-verify, up to `MAX_ATTEMPTS` total tries.
+//! Optional, off-by-default runtime crop verification: shells out to
+//! whichever multimodal CLI the caller selected as `VerifyBackend` (`codex`,
+//! OpenAI's coding agent, or `claude`, Claude Code - both used here purely as
+//! a multimodal judge, no code editing happens) with the rendered crop image
+//! and asks it to judge whether the crop is a clean, complete, standalone
+//! image of the detected object. If not, the backend proposes a
+//! bounding-box correction (in PDF points, on the visual sides of the
+//! image); we apply it, re-render, and re-verify, up to `MAX_ATTEMPTS` total
+//! tries. The two backends are mutually exclusive per run - see
+//! `VerifyBackend`.
 //!
-//! This module is purely additive: any failure to invoke/parse Codex
+//! This module is purely additive: any failure to invoke/parse the backend
 //! (binary missing, auth error, timeout, malformed JSON) is treated as a
 //! *soft* failure - it consumes an attempt and is recorded (both in
 //! `VerifyOutcome::last_issue` and as its own entry in
@@ -49,17 +52,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::pdf::render::{page_geometry, render_clip, ClipRenderBudget};
-use crate::pipeline::types::{BBoxPt, VerificationAttempt};
+use crate::pipeline::types::{BBoxPt, VerificationAttempt, VerifyBackend};
 
 /// Total attempts per object: 1 initial check + up to 2 corrective
 /// re-renders. Named/exported so it's easy to find and tune.
 pub const MAX_ATTEMPTS: u32 = 3;
 
-/// Wall-clock cap on a single `codex exec` invocation. A manual timing run
-/// against a real crop (see dev notes / README) took ~8s at default
-/// reasoning effort; this leaves generous headroom for slower prompts
-/// without letting a hung/stalled call block the pipeline indefinitely.
-const CODEX_TIMEOUT_SECS: u64 = 90;
+/// Wall-clock cap on a single verification-backend invocation (`codex exec`
+/// or `claude -p`). A manual timing run against a real crop (see dev notes /
+/// README) took ~8s at default reasoning effort; this leaves generous
+/// headroom for slower prompts without letting a hung/stalled call block the
+/// pipeline indefinitely.
+const VERIFY_TIMEOUT_SECS: u64 = 90;
+
+/// Model alias passed to every `claude -p` verification call, pinning cost
+/// regardless of whatever model the user's Claude Code install otherwise
+/// defaults to (which could be a pricier tier) - this loop can make up to
+/// `MAX_ATTEMPTS` calls per object across every detected object in a PDF, so
+/// an unpinned default would make cost unpredictable. `"sonnet"` is a
+/// standing alias Claude Code resolves to its latest Sonnet model, not a
+/// version string that goes stale.
+const CLAUDE_MODEL: &str = "sonnet";
 
 /// Absolute cap (in PDF points) on how far a single corrective adjustment
 /// may move any one side, guarding against a wild/degenerate Codex
@@ -156,42 +169,55 @@ struct BboxAdjustment {
     right: f32,
 }
 
-/// Resolves Codex from the process `PATH` and the common per-user install
-/// locations that Finder-launched macOS apps do not inherit. npm installs
-/// use a JavaScript launcher whose `#!/usr/bin/env node` would have the same
-/// GUI `PATH` problem, so those launchers are mapped to the platform-native
-/// Codex binary shipped inside the npm package.
-fn resolve_codex_binary() -> Result<PathBuf, String> {
+/// Resolves `name` from the process `PATH` and the common per-user install
+/// locations that Finder-launched macOS apps do not inherit (both the
+/// `codex` and `claude` CLIs can land in any of these depending on how the
+/// user installed them).
+fn resolve_binary(name: &str) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
     if let Some(path) = env::var_os("PATH") {
-        candidates.extend(env::split_paths(&path).map(|dir| dir.join("codex")));
+        candidates.extend(env::split_paths(&path).map(|dir| dir.join(name)));
     }
 
     if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
         for relative in [
-            ".local/bin/codex",
-            ".npm-global/bin/codex",
-            ".npm/bin/codex",
-            ".cargo/bin/codex",
-            ".bun/bin/codex",
-            ".volta/bin/codex",
-            "Library/pnpm/codex",
+            ".local/bin",
+            ".npm-global/bin",
+            ".npm/bin",
+            ".cargo/bin",
+            ".bun/bin",
+            ".volta/bin",
+            "Library/pnpm",
         ] {
-            candidates.push(home.join(relative));
+            candidates.push(home.join(relative).join(name));
         }
     }
 
-    candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
-    candidates.push(PathBuf::from("/usr/local/bin/codex"));
+    candidates.push(PathBuf::from("/opt/homebrew/bin").join(name));
+    candidates.push(PathBuf::from("/usr/local/bin").join(name));
 
-    for candidate in candidates {
-        if is_executable(&candidate) {
-            return Ok(resolve_npm_native_binary(&candidate).unwrap_or(candidate));
-        }
-    }
+    candidates
+        .into_iter()
+        .find(|candidate| is_executable(candidate))
+        .ok_or_else(|| format!("{name} binary not found on PATH or in common user install locations"))
+}
 
-    Err("codex binary not found on PATH or in common user install locations".to_string())
+/// npm installs of Codex use a JavaScript launcher whose `#!/usr/bin/env
+/// node` would have the same GUI `PATH` problem, so those launchers are
+/// mapped to the platform-native Codex binary shipped inside the npm
+/// package. This redirect is Codex/npm-package-specific and doesn't apply to
+/// `claude`.
+fn resolve_codex_binary() -> Result<PathBuf, String> {
+    let candidate = resolve_binary("codex")?;
+    Ok(resolve_npm_native_binary(&candidate).unwrap_or(candidate))
+}
+
+/// Resolves the `claude` (Claude Code) CLI binary the same way `codex` is
+/// resolved - no npm-native-binary redirect needed since Claude Code ships a
+/// native binary directly.
+fn resolve_claude_binary() -> Result<PathBuf, String> {
+    resolve_binary("claude")
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -254,15 +280,40 @@ pub fn codex_available() -> Result<String, String> {
     }
 }
 
-/// Renders `initial_bbox_pt`, asks Codex to verify it, and if it fails,
-/// applies Codex's suggested correction and retries - up to `max_attempts`
-/// total tries. Always returns `Ok` unless the underlying PDF render itself
-/// fails (which would fail the export anyway); any Codex/process/parse
-/// failure is captured as a soft failure inside `VerifyOutcome` instead.
+/// Quick check for whether the resolved `claude` binary executes without
+/// erroring. Used as an upfront preflight before starting a whole extraction
+/// run with verification enabled.
+pub fn claude_available() -> Result<String, String> {
+    let binary = resolve_claude_binary()?;
+    let mut cmd = Command::new(&binary);
+    cmd.arg("--version");
+    match run_with_timeout(cmd, Duration::from_secs(10), true) {
+        Ok(output) if output.status.success() => Ok(format!(
+            "{} ({})",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            binary.display()
+        )),
+        Ok(output) => Err(format!(
+            "claude --version exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(e) => Err(format!("claude binary not runnable at {}: {e}", binary.display())),
+    }
+}
+
+/// Renders `initial_bbox_pt`, asks the selected `backend` to verify it, and
+/// if it fails, applies the backend's suggested correction and retries - up
+/// to `max_attempts` total tries. Always returns `Ok` unless the underlying
+/// PDF render itself fails (which would fail the export anyway); any
+/// backend/process/parse failure is captured as a soft failure inside
+/// `VerifyOutcome` instead. `backend` must not be `VerifyBackend::Off` -
+/// callers only invoke this function when verification is enabled.
 ///
 /// `cancel` is polled between attempts (in addition to the between-object
 /// check already done by the caller) so a multi-attempt verification loop
 /// doesn't make Cancel unresponsive.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_and_correct_crop(
     page: &PdfPage,
     kind: &str,
@@ -271,13 +322,19 @@ pub fn verify_and_correct_crop(
     max_attempts: u32,
     work_dir: &Path,
     cancel: &AtomicBool,
+    backend: VerifyBackend,
 ) -> Result<(RgbImage, BBoxPt, VerifyOutcome)> {
     std::fs::create_dir_all(work_dir)
         .with_context(|| format!("creating verify work dir {work_dir:?}"))?;
 
+    // Only the Codex path needs the schema on disk (passed via
+    // `--output-schema`); Claude gets the same schema inline via
+    // `--json-schema`.
     let schema_path = work_dir.join("verify_schema.json");
-    std::fs::write(&schema_path, VERIFY_SCHEMA_JSON)
-        .with_context(|| format!("writing {schema_path:?}"))?;
+    if backend == VerifyBackend::Codex {
+        std::fs::write(&schema_path, VERIFY_SCHEMA_JSON)
+            .with_context(|| format!("writing {schema_path:?}"))?;
+    }
 
     let geometry = page_geometry(page);
     let mut current_bbox = initial_bbox_pt;
@@ -315,7 +372,15 @@ pub fn verify_and_correct_crop(
 
         let prompt = build_prompt(kind, current_bbox, attempt, max_attempts);
 
-        match run_codex_verify(&image_path, &schema_path, &output_path, work_dir, &prompt) {
+        let result = match backend {
+            VerifyBackend::Codex => run_codex_verify(&image_path, &schema_path, &output_path, work_dir, &prompt),
+            VerifyBackend::Claude => run_claude_verify(&image_path, work_dir, &prompt),
+            VerifyBackend::Off => {
+                Err(anyhow::anyhow!("verify_and_correct_crop called with backend=Off"))
+            }
+        };
+
+        match result {
             Ok(result) => {
                 // Record the RAW suggestion (before capping/clamping) so the
                 // history reflects what Codex actually said, not what we
@@ -480,7 +545,7 @@ fn run_codex_verify(
         .arg(work_dir)
         .arg(prompt);
 
-    let output = run_with_timeout(cmd, Duration::from_secs(CODEX_TIMEOUT_SECS), false)
+    let output = run_with_timeout(cmd, Duration::from_secs(VERIFY_TIMEOUT_SECS), false)
         .map_err(|e| anyhow::anyhow!("running codex exec: {e}"))?;
 
     if !output.status.success() {
@@ -498,14 +563,113 @@ fn run_codex_verify(
     Ok(result)
 }
 
+/// Shells out to `claude -p` (Claude Code's non-interactive print mode) as
+/// the alternative multimodal judge to Codex. Unlike Codex (which takes the
+/// image directly via `-i`), Claude Code has no direct image-attach flag, so
+/// the prompt explicitly instructs the model to open `image_path` with its
+/// `Read` tool first - `--tools "Read"` is the only tool granted, and
+/// `--permission-mode bypassPermissions` skips the interactive confirmation
+/// that would otherwise block a headless call. Structured output is
+/// enforced via `--json-schema` (Claude Code's equivalent of Codex's
+/// `--output-schema`) and read back from stdout (`--output-format json`)
+/// rather than an output file. `--disable-slash-commands`,
+/// `--setting-sources ""`, and `--strict-mcp-config` strip the user's
+/// skills/plugins/MCP servers from the loaded system prompt - both to avoid
+/// unrelated tools/services adding latency or failure surface to a headless
+/// verification call, and because loading them roughly 7x'd the measured
+/// per-call token cost in manual testing. `--no-session-persistence` avoids
+/// littering `~/.claude` with one-shot verification sessions. `--model` is
+/// pinned to `CLAUDE_MODEL` (see its doc comment) for cost predictability.
+fn run_claude_verify(image_path: &Path, work_dir: &Path, prompt: &str) -> Result<VerifyResult> {
+    let binary = resolve_claude_binary().map_err(anyhow::Error::msg)?;
+    let full_prompt = format!(
+        "Use the Read tool to open the image file at {} before answering. {prompt}",
+        image_path.display(),
+    );
+
+    let mut cmd = Command::new(binary);
+    cmd.current_dir(work_dir)
+        .arg("-p")
+        .arg(&full_prompt)
+        .arg("--output-format")
+        .arg("json")
+        .arg("--json-schema")
+        .arg(VERIFY_SCHEMA_JSON)
+        .arg("--permission-mode")
+        .arg("bypassPermissions")
+        .arg("--tools")
+        .arg("Read")
+        .arg("--add-dir")
+        .arg(work_dir)
+        .arg("--disable-slash-commands")
+        .arg("--setting-sources")
+        .arg("")
+        .arg("--strict-mcp-config")
+        .arg("--no-session-persistence")
+        .arg("--model")
+        .arg(CLAUDE_MODEL);
+
+    let output = run_with_timeout(cmd, Duration::from_secs(VERIFY_TIMEOUT_SECS), true)
+        .map_err(|e| anyhow::anyhow!("running claude -p: {e}"))?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "claude -p exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    parse_claude_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parses `claude -p --output-format json` stdout into a `VerifyResult`.
+/// The exact top-level shape has been observed to vary (a single result
+/// object in some configurations, a JSON array of the full transcript with
+/// the result event last in others) depending on which flags are set, so
+/// this handles both rather than assuming one: it finds the object with
+/// `"type": "result"` (itself, or the last matching array element), bails
+/// with that event's own error text if `is_error` is set, then reads the
+/// already-parsed `structured_output` field (rather than re-parsing the
+/// `result` string field, which is redundant and only present as a
+/// convenience for text consumers).
+fn parse_claude_output(raw: &str) -> Result<VerifyResult> {
+    let value: serde_json::Value = serde_json::from_str(raw.trim())
+        .with_context(|| format!("parsing claude -p JSON output: {raw}"))?;
+
+    let result_event = match &value {
+        serde_json::Value::Array(events) => events
+            .iter()
+            .rev()
+            .find(|e| e.get("type").and_then(|t| t.as_str()) == Some("result"))
+            .ok_or_else(|| anyhow::anyhow!("no \"result\" event in claude -p output: {raw}"))?,
+        serde_json::Value::Object(_) => &value,
+        _ => anyhow::bail!("unexpected claude -p JSON shape: {raw}"),
+    };
+
+    if result_event.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+        let msg = result_event.get("result").and_then(|v| v.as_str()).unwrap_or("unknown error");
+        anyhow::bail!("claude -p returned an error: {msg}");
+    }
+
+    let structured = result_event
+        .get("structured_output")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("claude -p result missing structured_output: {raw}"))?;
+
+    serde_json::from_value(structured)
+        .with_context(|| format!("parsing claude structured_output into VerifyResult: {raw}"))
+}
+
 /// Spawns `cmd` and waits for it with a hard wall-clock cap, killing it if
 /// exceeded. stderr is always drained on a background thread so a large
 /// stderr buffer can never deadlock the poll loop against a full pipe.
 /// stdout is drained the same way only when `capture_stdout` is set - the
-/// main `codex exec` verification calls don't need it (the structured
+/// main `codex exec` verification call doesn't need it (the structured
 /// result is read from the `-o` file instead, and the chatty transcript can
-/// be large), but the quick `codex --version` preflight check does, to
-/// surface the version string to the UI.
+/// be large), but the `claude -p` verification call does (its structured
+/// result comes back on stdout), as does the quick `--version` preflight
+/// check for either backend, to surface the version string to the UI.
 ///
 fn run_with_timeout(
     mut cmd: Command,
@@ -583,6 +747,15 @@ mod tests {
         assert_ne!(binary.file_name().and_then(|name| name.to_str()), Some("codex.js"));
         let status = codex_available().expect("run installed Codex CLI");
         assert!(status.contains("codex-cli"), "unexpected status: {status}");
+    }
+
+    #[test]
+    #[ignore = "requires an installed Claude Code CLI"]
+    fn installed_claude_resolves_to_runnable_binary() {
+        let binary = resolve_claude_binary().expect("resolve installed Claude Code CLI");
+        assert!(is_executable(&binary), "not executable: {}", binary.display());
+        let status = claude_available().expect("run installed Claude Code CLI");
+        assert!(status.contains("Claude Code"), "unexpected status: {status}");
     }
 
     #[test]

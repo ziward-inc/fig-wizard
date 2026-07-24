@@ -26,7 +26,9 @@ export interface ModelStatus {
   using_dev_assets: boolean
 }
 
-export interface CodexStatus {
+export type VerifyBackend = "off" | "codex" | "claude"
+
+export interface BackendStatus {
   available: boolean
   detail: string
 }

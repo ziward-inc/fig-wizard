@@ -12,7 +12,9 @@ use crate::detect::{DocLayoutModel, TARGET_SIZE};
 use crate::pdf::render::{pixel_box_to_pdf_points, render_page_for_detection, resize_for_model, ClipRenderBudget};
 use crate::pipeline::associate::associate_page;
 use crate::pipeline::export::{export_object, manifest_entry, write_manifest};
-use crate::pipeline::types::{Manifest, ManifestEntry, OutputFormat, PageDetection, VerificationInfo};
+use crate::pipeline::types::{
+    Manifest, ManifestEntry, OutputFormat, PageDetection, VerificationInfo, VerifyBackend,
+};
 use crate::verify;
 
 /// DPI used for the full-page detection-pass render (matches the 200 DPI
@@ -53,11 +55,11 @@ pub struct ProcessPdfParams<'a> {
     /// as (see `pipeline::types::OutputFormat` - this app used to always
     /// export both WebP and AVIF; now the caller picks one).
     pub output_format: OutputFormat,
-    /// Off by default: when true, each detected object's crop is checked
-    /// (and, if needed, corrected and re-checked) via the `codex` CLI
-    /// before export - see `crate::verify`. Requires network access and
-    /// meaningfully increases extraction time, hence opt-in.
-    pub verify_with_codex: bool,
+    /// Off by default: when set to `Codex` or `Claude`, each detected
+    /// object's crop is checked (and, if needed, corrected and re-checked)
+    /// via that CLI before export - see `crate::verify`. Requires network
+    /// access and meaningfully increases extraction time, hence opt-in.
+    pub verify_backend: VerifyBackend,
 }
 
 /// Runs the full pipeline for one PDF. `on_event` is called for progress
@@ -156,7 +158,7 @@ pub fn process_pdf(
             let seq = seq_by_kind.entry(obj.kind.as_str()).or_insert(0);
             *seq += 1;
 
-            let verification = if params.verify_with_codex {
+            let verification = if params.verify_backend != VerifyBackend::Off {
                 let verify_dir = std::env::temp_dir().join(format!("pdf-extractor-verify-{}", obj.id));
                 let outcome = verify::verify_and_correct_crop(
                     &page,
@@ -166,6 +168,7 @@ pub fn process_pdf(
                     verify::MAX_ATTEMPTS,
                     &verify_dir,
                     cancel,
+                    params.verify_backend,
                 )
                 .with_context(|| format!("verifying crop for object {}", obj.id))?;
                 let _ = std::fs::remove_dir_all(&verify_dir);

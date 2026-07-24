@@ -22,7 +22,7 @@ pub fn run() {
             commands::cancel_extraction,
             commands::list_results,
             commands::open_result_dir,
-            commands::codex_status,
+            commands::backend_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

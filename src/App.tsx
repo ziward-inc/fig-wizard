@@ -11,8 +11,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { dirName, pdfStem } from "@/lib/format"
 import {
+  backendStatus,
   cancelExtraction,
-  codexStatus,
   downloadModel,
   modelStatus as fetchModelStatus,
   listResults,
@@ -31,7 +31,14 @@ import type {
   OutputFormat,
   PageDetectedPayload,
   PdfInfo,
+  VerifyBackend,
 } from "@/lib/tauri-types"
+
+const BACKEND_LABELS: Record<VerifyBackend, string> = {
+  off: "",
+  codex: "Codex CLI",
+  claude: "Claude Code",
+}
 
 export function App() {
   const [currentPdf, setCurrentPdfState] = useState<PdfInfo | null>(null)
@@ -49,9 +56,13 @@ export function App() {
 
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("webp")
 
-  const [verifyChecked, setVerifyChecked] = useState(false)
-  const [codexAvailable, setCodexAvailable] = useState<boolean | null>(null)
-  const [codexStatusLine, setCodexStatusLine] = useState<string | null>(null)
+  const [verifyBackend, setVerifyBackend] = useState<VerifyBackend>("off")
+  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(
+    null
+  )
+  const [backendStatusLine, setBackendStatusLine] = useState<string | null>(
+    null
+  )
 
   const [currentJobId, setCurrentJobIdState] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
@@ -237,27 +248,31 @@ export function App() {
     }
   }, [setCurrentOutputDir])
 
-  const handleVerifyCheckedChange = useCallback(async (checked: boolean) => {
-    setVerifyChecked(checked)
-    if (!checked) {
-      setCodexStatusLine(null)
-      setCodexAvailable(null)
-      return
-    }
-    setCodexStatusLine("Checking for Codex CLI…")
-    try {
-      const status = await codexStatus()
-      setCodexAvailable(status.available)
-      setCodexStatusLine(
-        status.available
-          ? `Codex CLI found (${status.detail}). Verification will run per object.`
-          : `Codex CLI not available: ${status.detail}. Uncheck this box, or install/authenticate Codex CLI first.`
-      )
-    } catch (e) {
-      setCodexAvailable(false)
-      setCodexStatusLine(`Could not check Codex CLI status: ${e}`)
-    }
-  }, [])
+  const handleVerifyBackendChange = useCallback(
+    async (backend: VerifyBackend) => {
+      setVerifyBackend(backend)
+      if (backend === "off") {
+        setBackendStatusLine(null)
+        setBackendAvailable(null)
+        return
+      }
+      const label = BACKEND_LABELS[backend]
+      setBackendStatusLine(`Checking for ${label}…`)
+      try {
+        const status = await backendStatus(backend)
+        setBackendAvailable(status.available)
+        setBackendStatusLine(
+          status.available
+            ? `${label} found (${status.detail}). Verification will run per object.`
+            : `${label} not available: ${status.detail}. Choose "Off", or install/authenticate ${label} first.`
+        )
+      } catch (e) {
+        setBackendAvailable(false)
+        setBackendStatusLine(`Could not check ${label} status: ${e}`)
+      }
+    },
+    []
+  )
 
   const handleExtract = useCallback(async () => {
     if (!currentPdf || !currentOutputDir) return
@@ -272,7 +287,7 @@ export function App() {
         pdfPath: currentPdf.path,
         outputDir: currentOutputDir,
         outputFormat,
-        verifyWithCodex: verifyChecked,
+        verifyBackend,
       })
       setCurrentJobId(jobId)
     } catch (e) {
@@ -283,7 +298,7 @@ export function App() {
     currentPdf,
     outputFormat,
     setCurrentJobId,
-    verifyChecked,
+    verifyBackend,
   ])
 
   const handleCancel = useCallback(async () => {
@@ -305,8 +320,8 @@ export function App() {
   if (!currentPdf) extractReasons.push("choose a PDF")
   if (!currentOutputDir) extractReasons.push("choose an output folder")
   if (!modelReady) extractReasons.push("model not ready — download it above")
-  if (verifyChecked && codexAvailable === false)
-    extractReasons.push("Codex CLI not available")
+  if (verifyBackend !== "off" && backendAvailable === false)
+    extractReasons.push(`${BACKEND_LABELS[verifyBackend]} not available`)
   const extractDisabled = extractReasons.length > 0 || busy
   const disabledReason = extractReasons.length
     ? `Waiting on: ${extractReasons.join(", ")}`
@@ -385,9 +400,9 @@ export function App() {
         </CardHeader>
         <CardContent>
           <VerifySection
-            checked={verifyChecked}
-            onCheckedChange={handleVerifyCheckedChange}
-            codexStatusLine={codexStatusLine}
+            value={verifyBackend}
+            onValueChange={handleVerifyBackendChange}
+            statusLine={backendStatusLine}
           />
           <ExtractSection
             onExtract={handleExtract}

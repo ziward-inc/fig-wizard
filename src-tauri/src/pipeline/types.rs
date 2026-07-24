@@ -273,14 +273,27 @@ pub struct ExportedFiles {
     pub no_caption: String,
 }
 
-/// One attempt's outcome within a single object's Codex crop-verification
-/// loop (see `verify::verify_and_correct_crop`). `bbox_adjustment_pt`, when
+/// Which AI CLI (if any) performs the post-hoc crop verification pass in
+/// `crate::verify`. Mutually exclusive: verification is off, or it runs
+/// through exactly one of the two supported multimodal CLI backends - never
+/// both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VerifyBackend {
+    #[default]
+    Off,
+    Codex,
+    Claude,
+}
+
+/// One attempt's outcome within a single object's crop-verification loop
+/// (see `verify::verify_and_correct_crop`). `bbox_adjustment_pt`, when
 /// present, is `[top, bottom, left, right]` in PDF points - the RAW
-/// suggestion Codex made for that attempt (before the capping/clamping
-/// `verify::apply_adjustment` applies), using the same sign convention
-/// documented in `verify/mod.rs` (positive = expand outward on that side).
-/// `None` when the attempt passed (no adjustment needed) or when it was a
-/// soft failure that never produced a parsed Codex response.
+/// suggestion the AI backend made for that attempt (before the
+/// capping/clamping `verify::apply_adjustment` applies), using the same sign
+/// convention documented in `verify/mod.rs` (positive = expand outward on
+/// that side). `None` when the attempt passed (no adjustment needed) or
+/// when it was a soft failure that never produced a parsed response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerificationAttempt {
     pub attempt: u32,
@@ -292,7 +305,7 @@ pub struct VerificationAttempt {
 
 /// One manifest entry: everything an external tool/reviewer needs to know
 /// about one exported object.
-/// Outcome of the optional Codex crop-verification pass for one object.
+/// Outcome of the optional AI crop-verification pass for one object.
 /// Absent (`None`) on `ManifestEntry` whenever verification wasn't enabled
 /// for the run that produced this entry, so manifests from before this
 /// feature existed (and runs with the checkbox left off) stay clean.

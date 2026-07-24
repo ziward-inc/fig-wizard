@@ -20,7 +20,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::detect::DEFAULT_SCORE_THRESH;
 use crate::pdf::render::{init_pdfium, ClipRenderBudget};
 use crate::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
-use crate::pipeline::types::{Manifest, OutputFormat};
+use crate::pipeline::types::{Manifest, OutputFormat, VerifyBackend};
 use crate::verify;
 
 const MODEL_URL: &str =
@@ -83,19 +83,26 @@ pub struct ModelStatus {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CodexStatus {
+pub struct BackendStatus {
     pub available: bool,
     pub detail: String,
 }
 
-/// Checks whether the `codex` CLI can be resolved and runs `codex --version`
-/// so the frontend can show a helpful message up front when the user enables
-/// the "verify with Codex" checkbox.
+/// Checks whether the selected AI verification backend's CLI can be
+/// resolved and runs its `--version` so the frontend can show a helpful
+/// message up front when the user picks it in the verify-backend selector.
+/// `VerifyBackend::Off` trivially reports available (there's nothing to
+/// check).
 #[tauri::command]
-pub fn codex_status() -> CodexStatus {
-    match verify::codex_available() {
-        Ok(version) => CodexStatus { available: true, detail: version },
-        Err(e) => CodexStatus { available: false, detail: e },
+pub fn backend_status(backend: VerifyBackend) -> BackendStatus {
+    let result = match backend {
+        VerifyBackend::Off => return BackendStatus { available: true, detail: String::new() },
+        VerifyBackend::Codex => verify::codex_available(),
+        VerifyBackend::Claude => verify::claude_available(),
+    };
+    match result {
+        Ok(version) => BackendStatus { available: true, detail: version },
+        Err(e) => BackendStatus { available: false, detail: e },
     }
 }
 
@@ -272,22 +279,33 @@ pub async fn run_extraction(
     pdf_path: String,
     output_dir: String,
     output_format: Option<OutputFormat>,
-    verify_with_codex: Option<bool>,
+    verify_backend: Option<VerifyBackend>,
 ) -> Result<String, String> {
-    let verify_with_codex = verify_with_codex.unwrap_or(false);
+    let verify_backend = verify_backend.unwrap_or_default();
     let output_format = output_format.unwrap_or_default();
     let (model_path, labels) = resolve_model_and_labels(&app)?;
 
     // Preflight: if verification was requested, fail fast with a clear
     // message rather than silently no-op'ing (or erroring) per-object deep
     // into a long extraction run.
-    if verify_with_codex {
-        verify::codex_available().map_err(|e| {
-            format!(
-                "Codex verification was requested, but the `codex` CLI isn't available: {e}. \
-Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
-            )
-        })?;
+    match verify_backend {
+        VerifyBackend::Off => {}
+        VerifyBackend::Codex => {
+            verify::codex_available().map_err(|e| {
+                format!(
+                    "Codex verification was requested, but the `codex` CLI isn't available: {e}. \
+Install/authenticate Codex CLI, or choose a different verification option."
+                )
+            })?;
+        }
+        VerifyBackend::Claude => {
+            verify::claude_available().map_err(|e| {
+                format!(
+                    "Claude Code verification was requested, but the `claude` CLI isn't available: {e}. \
+Install/authenticate Claude Code, or choose a different verification option."
+                )
+            })?;
+        }
     }
 
     let pdfium = take_pdfium(&app, &state)?;
@@ -318,7 +336,7 @@ Install/authenticate Codex CLI, or leave \"Verify crops with Codex\" unchecked."
                     score_thresh: DEFAULT_SCORE_THRESH,
                     clip_budget: ClipRenderBudget::default(),
                     output_format,
-                    verify_with_codex,
+                    verify_backend,
                 },
                 &cancel,
                 move |event| {

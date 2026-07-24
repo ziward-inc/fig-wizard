@@ -1,10 +1,10 @@
-//! Fast, targeted smoke test for the optional Codex crop-verification
-//! feature: verifies ONE known real object (the algorithm box on ppo.pdf
-//! page 5, same object `tests/detect_smoke.rs` already exercises) rather
-//! than running the full 12-page pipeline, so it completes in well under a
-//! minute of real `codex exec` calls instead of the 10+ minutes a full-PDF
+//! Fast, targeted smoke test for the optional AI crop-verification feature:
+//! verifies ONE known real object (the algorithm box on ppo.pdf page 5,
+//! same object `tests/detect_smoke.rs` already exercises) rather than
+//! running the full 12-page pipeline, so it completes in well under a
+//! minute of real backend-CLI calls instead of the 10+ minutes a full-PDF
 //! run costs. Requires local dev assets (pdfium dylib + ONNX model) and a
-//! working, authenticated `codex` CLI on PATH - run explicitly with
+//! working, authenticated backend CLI on PATH - run explicitly with
 //! `cargo test --test verify_smoke -- --ignored --nocapture`.
 
 use figwizard_lib::detect::{DocLayoutModel, DEFAULT_SCORE_THRESH, TARGET_SIZE};
@@ -12,7 +12,8 @@ use figwizard_lib::pdf::render::{
     init_pdfium, pixel_box_to_pdf_points, render_page_for_detection, resize_for_model,
     ClipRenderBudget,
 };
-use figwizard_lib::verify::{codex_available, verify_and_correct_crop, MAX_ATTEMPTS};
+use figwizard_lib::pipeline::types::VerifyBackend;
+use figwizard_lib::verify::{claude_available, codex_available, verify_and_correct_crop, MAX_ATTEMPTS};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -23,11 +24,18 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-#[test]
-#[ignore]
-fn verify_single_algorithm_crop() {
-    let version = codex_available().expect("codex CLI should be available and runnable");
-    println!("codex available: {version}");
+fn verify_single_algorithm_crop_with_backend(backend: VerifyBackend) {
+    match backend {
+        VerifyBackend::Codex => {
+            let version = codex_available().expect("codex CLI should be available and runnable");
+            println!("codex available: {version}");
+        }
+        VerifyBackend::Claude => {
+            let version = claude_available().expect("claude CLI should be available and runnable");
+            println!("claude available: {version}");
+        }
+        VerifyBackend::Off => unreachable!("test always passes a real backend"),
+    }
 
     let root = repo_root();
     let pdfium_dir = root.join("src-tauri/binaries/pdfium/lib");
@@ -82,6 +90,7 @@ fn verify_single_algorithm_crop() {
         MAX_ATTEMPTS,
         &work_dir,
         &cancel,
+        backend,
     )
     .expect("verify_and_correct_crop failed");
 
@@ -104,7 +113,7 @@ fn verify_single_algorithm_crop() {
             .as_deref()
             .unwrap_or("")
             .starts_with("verification_error"),
-        "expected a real Codex response, not an error: {:?}",
+        "expected a real backend response, not an error: {:?}",
         outcome.last_issue
     );
 
@@ -129,4 +138,16 @@ fn verify_single_algorithm_crop() {
             "a passed attempt should have no bbox adjustment recorded"
         );
     }
+}
+
+#[test]
+#[ignore]
+fn verify_single_algorithm_crop_codex() {
+    verify_single_algorithm_crop_with_backend(VerifyBackend::Codex);
+}
+
+#[test]
+#[ignore]
+fn verify_single_algorithm_crop_claude() {
+    verify_single_algorithm_crop_with_backend(VerifyBackend::Claude);
 }

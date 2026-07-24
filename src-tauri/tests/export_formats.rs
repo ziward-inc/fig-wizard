@@ -14,7 +14,7 @@
 use figwizard_lib::detect::DEFAULT_SCORE_THRESH;
 use figwizard_lib::pdf::render::{init_pdfium, ClipRenderBudget};
 use figwizard_lib::pipeline::run::{process_pdf, PipelineEvent, ProcessPdfParams};
-use figwizard_lib::pipeline::types::OutputFormat;
+use figwizard_lib::pipeline::types::{OutputFormat, VerifyBackend};
 use pdfium_render::prelude::Pdfium;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -109,7 +109,7 @@ fn run_for_format(pdfium: &Pdfium, root: &Path, model_path: &PathBuf, labels: Ve
             score_thresh: DEFAULT_SCORE_THRESH,
             clip_budget: ClipRenderBudget::default(),
             output_format: format,
-            verify_with_codex: false,
+            verify_backend: VerifyBackend::Off,
         },
         &cancel,
         |event| {
