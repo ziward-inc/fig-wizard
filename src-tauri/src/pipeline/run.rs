@@ -93,6 +93,11 @@ pub fn process_pdf(
 
     let mut entries: Vec<ManifestEntry> = Vec::new();
 
+    // Global (whole-document) per-kind counter: object filenames live flat
+    // in `doc_out_dir` (no per-page subfolder), so `figure-01`, `figure-02`,
+    // ... must stay unique across every page rather than resetting each page.
+    let mut seq_by_kind: HashMap<&'static str, u32> = HashMap::new();
+
     for page_index in 0..page_count {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -148,9 +153,6 @@ pub fn process_pdf(
             counts_by_kind,
         });
 
-        let page_dir = doc_out_dir.join(format!("page-{:04}", page_index + 1));
-
-        let mut seq_by_kind: HashMap<&'static str, u32> = HashMap::new();
         for obj in &mut objects {
             if cancel.load(Ordering::Relaxed) {
                 break;
@@ -191,8 +193,16 @@ pub fn process_pdf(
                 None
             };
 
-            let files = export_object(&page, obj, &page_dir, *seq, params.clip_budget, params.output_format)
-                .with_context(|| format!("exporting object {}", obj.id))?;
+            let files = export_object(
+                &page,
+                obj,
+                &doc_out_dir,
+                page_index + 1,
+                *seq,
+                params.clip_budget,
+                params.output_format,
+            )
+            .with_context(|| format!("exporting object {}", obj.id))?;
 
             on_event(PipelineEvent::ObjectExported {
                 id: obj.id.clone(),

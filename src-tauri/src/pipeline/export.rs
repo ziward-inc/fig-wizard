@@ -108,21 +108,25 @@ fn encode(img: &RgbImage, format: OutputFormat) -> Result<Vec<u8>> {
 }
 
 /// Renders and encodes the with/without-caption variants for one object in
-/// the caller-selected `output_format`, writing them under
-/// `<page_dir>/<kind>-NN_{with,no}-caption[_q85].<ext>` (the `_q85` quality
-/// suffix is omitted for PNG, since it's lossless).
+/// the caller-selected `output_format`, writing them flat into `out_dir`
+/// (no per-page subfolder) as
+/// `p<PP>_<kind>-NN_{with,no}-caption[_q85].<ext>` (the `_q85` quality
+/// suffix is omitted for PNG, since it's lossless). `page_number` is
+/// 1-indexed; `seq` is a whole-document counter per `kind` (not reset per
+/// page), since filenames for every page now share one flat directory.
 pub fn export_object(
     page: &PdfPage,
     obj: &DetectedObject,
-    page_dir: &Path,
-    seq_in_page: u32,
+    out_dir: &Path,
+    page_number: u32,
+    seq: u32,
     budget: ClipRenderBudget,
     output_format: OutputFormat,
 ) -> Result<ExportedFiles> {
-    fs::create_dir_all(page_dir)
-        .with_context(|| format!("creating page output dir {page_dir:?}"))?;
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("creating output dir {out_dir:?}"))?;
 
-    let base = format!("{}-{:02}", obj.kind.as_str(), seq_in_page);
+    let base = format!("p{:02}_{}-{:02}", page_number, obj.kind.as_str(), seq);
 
     let no_caption_bbox = obj.bbox_pt;
     let with_caption_bbox = obj.with_caption_bbox();
@@ -142,15 +146,15 @@ pub fn export_object(
 
     let ext = output_format.extension();
     let quality_suffix = if output_format.is_lossless() { "" } else { "_q85" };
-    let no_caption_path = page_dir.join(format!("{base}_no-caption{quality_suffix}.{ext}"));
-    let with_caption_path = page_dir.join(format!("{base}_with-caption{quality_suffix}.{ext}"));
+    let no_caption_path = out_dir.join(format!("{base}_no-caption{quality_suffix}.{ext}"));
+    let with_caption_path = out_dir.join(format!("{base}_with-caption{quality_suffix}.{ext}"));
 
-    // `page_dir` is created up front, but re-assert it here too: if this
+    // `out_dir` is created up front, but re-assert it here too: if this
     // export follows a (possibly long, network-bound) verification pass,
     // be defensive against anything having removed it out from under us in
     // the meantime, and give each write an explicit path in its error
     // context rather than a bare unlabelled io::Error.
-    fs::create_dir_all(page_dir).with_context(|| format!("re-creating page output dir {page_dir:?} before writing crops"))?;
+    fs::create_dir_all(out_dir).with_context(|| format!("re-creating output dir {out_dir:?} before writing crops"))?;
 
     fs::write(&no_caption_path, encode(&no_caption_img, output_format)?)
         .with_context(|| format!("writing {no_caption_path:?}"))?;

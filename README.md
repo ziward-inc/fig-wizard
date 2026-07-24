@@ -45,10 +45,11 @@ download.
 2. Pick an output folder (defaults to `extracted/` next to the PDF).
 3. Choose one output format — WebP, AVIF, PNG, JPEG, or JPEG XL (WebP is the default).
 4. Click **Extract** and watch live per-page progress.
-5. Browse results grouped by page; click **OPEN** to view a page's folder in Finder.
+5. Browse results grouped by page; click **OPEN** to view the document's output folder in Finder.
 
-Each run writes exactly two files per detected object (with-caption and no-caption) to
-`<output_dir>/<pdf-stem>/page-NNNN/`, plus a `manifest.json` describing every export (kind,
+Each run writes exactly two files per detected object (with-caption and no-caption), flat into
+`<output_dir>/<pdf-stem>/` (filenames like `p04_figure-01_no-caption.webp` embed the page
+number), plus a `manifest.json` describing every export (kind,
 page, bounding box, score, caption association, file paths). Re-running with a different
 format overwrites both the files and the manifest. See
 [docs/TECHNICAL_DETAILS.md](docs/TECHNICAL_DETAILS.md) for the exact manifest schema.
